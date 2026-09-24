@@ -1,5 +1,7 @@
 # App Finanzas
 
+Esta es una app domestica hecha para uso personal. No tiene la documentación y compatibilidad hecha con estandares industriales.
+
 App de escritorio (Electron) para registrar ingresos, gastos, inversiones y una lista de compras, todo en CLP. Los datos se guardan como JSON en la carpeta que elijas (por ejemplo `OneDrive/app-finanzas`), así puedes usarla desde varios equipos.
 
 ## Instalar y ejecutar
