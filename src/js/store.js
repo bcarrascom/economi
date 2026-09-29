@@ -82,6 +82,7 @@ export function normMov(m = {}) {
     },
     esInversion: !!m.esInversion,
     desdeAhorro: !!m.desdeAhorro,
+    reembolso: Math.max(0, int(m.reembolso)),
     inversion: { ingresoId: m.inversion?.ingresoId || null },
     origen: m.origen || null,
     creado: m.creado || new Date().toISOString(),

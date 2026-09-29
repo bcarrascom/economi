@@ -6,6 +6,8 @@
 //  Objetivo             = Σ costo de ítems de la lista de compras marcados como ahorro
 //  Ideal teórico        = Σ costo de todos los ítems de la lista de compras
 //  Coeficiente (periodo)= ingresos − gastos del periodo (mes o año)
+//  Reembolso            = un gasto con reembolso cuenta como (monto − reembolso); si el reembolso
+//                          supera el monto, la diferencia cuenta como ingreso (gastoEfectivo / ingresoEfectivo)
 
 import { today, clamp, claveDe, sumarDias, nowHHMM } from './format.js';
 
@@ -21,14 +23,29 @@ export function aporteAhorro(m) {
   return Math.round((m.monto * Math.min(v, 100)) / 100);
 }
 
+/**
+ * Un gasto reembolsado deja de contar (total o parcialmente) como gasto; si lo reembolsado
+ * supera lo gastado, la diferencia pasa a contar como ingreso (ver ingresoEfectivo).
+ */
+export function gastoEfectivo(m) {
+  if (!esGasto(m)) return 0;
+  return Math.max(0, m.monto - (m.reembolso || 0));
+}
+
+/** Ingreso "real" de un movimiento: su monto si es ingreso, o el excedente de un reembolso sobre lo gastado. */
+export function ingresoEfectivo(m) {
+  if (esIngreso(m)) return m.monto;
+  return Math.max(0, (m.reembolso || 0) - m.monto);
+}
+
 /** Efecto de un movimiento sobre el presupuesto de ahorro. */
 export function efectoAhorro(m) {
   if (esIngreso(m)) return aporteAhorro(m);
-  if (esGasto(m) && m.desdeAhorro) return -m.monto;
+  if (esGasto(m) && m.desdeAhorro) return efectoNeto(m);
   return 0;
 }
 
-export const efectoNeto = (m) => (esIngreso(m) ? m.monto : -m.monto);
+export const efectoNeto = (m) => (esIngreso(m) ? m.monto : (m.reembolso || 0) - m.monto);
 
 /** periodo: 'semana' | 'mes' | 'anio' | 'todo' */
 export function enPeriodo(m, periodo, ref = today()) {
@@ -39,8 +56,8 @@ export function enPeriodo(m, periodo, ref = today()) {
 }
 
 export function totalesDe(movs) {
-  const ingresos = sum(movs.filter(esIngreso), (m) => m.monto);
-  const gastos = sum(movs.filter(esGasto), (m) => m.monto);
+  const ingresos = sum(movs, ingresoEfectivo);
+  const gastos = sum(movs, gastoEfectivo);
   return { ingresos, gastos, coef: ingresos - gastos };
 }
 
@@ -50,9 +67,9 @@ function agrupar(movs, claveDeMov) {
     const k = claveDeMov(m.fecha);
     if (!map.has(k)) map.set(k, { key: k, ingresos: 0, gastos: 0, coef: 0, ahorro: 0, count: 0, arrepSum: 0, arrepN: 0 });
     const e = map.get(k);
-    if (esIngreso(m)) e.ingresos += m.monto;
-    else {
-      e.gastos += m.monto;
+    e.ingresos += ingresoEfectivo(m);
+    e.gastos += gastoEfectivo(m);
+    if (esGasto(m)) {
       e.arrepSum += m.arrepentimiento || 0;
       e.arrepN += 1;
     }
@@ -158,16 +175,17 @@ export function estadoInversion(g, movs) {
   };
 }
 
-/** Totales por tag. Un movimiento con varios tags suma en cada uno. */
+/** Totales por tag. Un movimiento con varios tags suma en cada uno. Los gastos usan su monto ya neto de reembolsos. */
 export function porTag(movs, tags, tipo = 'gasto') {
   const rows = tags.map((t) => ({ tag: t, total: 0, count: 0 }));
   const idx = new Map(rows.map((r) => [r.tag.id, r]));
   const sinTag = { tag: null, total: 0, count: 0 };
   for (const m of movs) {
     if (m.tipo !== tipo) continue;
+    const monto = tipo === 'gasto' ? gastoEfectivo(m) : m.monto;
     const ids = (m.tags || []).filter((id) => idx.has(id));
-    if (!ids.length) { sinTag.total += m.monto; sinTag.count += 1; }
-    for (const id of ids) { const r = idx.get(id); r.total += m.monto; r.count += 1; }
+    if (!ids.length) { sinTag.total += monto; sinTag.count += 1; }
+    for (const id of ids) { const r = idx.get(id); r.total += monto; r.count += 1; }
   }
   const out = rows.filter((r) => r.total > 0).sort((a, b) => b.total - a.total);
   if (sinTag.total > 0) out.push(sinTag);
@@ -191,11 +209,21 @@ export function arrepentimientoPorTag(movs, tags) {
     .sort((a, b) => b.pct - a.pct);
 }
 
-/** Monto gastado por nivel de arrepentimiento [0..5]. */
+/** Monto gastado (neto de reembolsos) por nivel de arrepentimiento [0..5]. */
 export function porArrepentimiento(movs) {
   const arr = [0, 0, 0, 0, 0, 0];
-  for (const m of movs) if (esGasto(m)) arr[clamp(m.arrepentimiento || 0, 0, 5)] += m.monto;
+  for (const m of movs) if (esGasto(m)) arr[clamp(m.arrepentimiento || 0, 0, 5)] += gastoEfectivo(m);
   return arr;
+}
+
+/**
+ * Signo y monto final a mostrar para un movimiento, considerando reembolsos:
+ * un gasto reembolsado en exceso se muestra como ingreso (signo +1).
+ */
+export function montoMostrado(m) {
+  if (esIngreso(m)) return { signo: 1, monto: m.monto };
+  const ef = efectoNeto(m); // reembolso - monto
+  return ef >= 0 ? { signo: 1, monto: ef } : { signo: -1, monto: -ef };
 }
 
 /** Filtro por tags: coincide si el ítem tiene al menos uno de los seleccionados. */

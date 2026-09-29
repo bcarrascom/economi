@@ -1,7 +1,9 @@
 // Progresión: evolución de ingresos, gastos y coeficiente en el tiempo, más el detalle mes a mes.
 
 import { state } from '../store.js';
-import { porMes, porPeriodo, porTag, totalesDe } from '../calc.js';
+import {
+  porMes, porPeriodo, porTag, totalesDe, montoMostrado,
+} from '../calc.js';
 import {
   clp, clpSigned, pct, esc, monthName, pad, currentYear, currentMonthKey, fechaCorta, regretColor, hexToRgba,
   periodoLabel, ultimosPeriodos,
@@ -216,8 +218,10 @@ function detalleMes(key) {
       </div>
       <div>
         <h5>Movimientos</h5>
-        <div class="mini-list">${movs.map((m) => `
-          <div class="mini-row"><span class="dim">${fechaCorta(m.fecha)}</span><span class="grow">${esc(m.nombre)}</span><span class="${m.tipo === 'ingreso' ? 'pos' : 'neg'}">${m.tipo === 'ingreso' ? '+' : '−'}${clp(m.monto)}</span></div>`).join('')}
+        <div class="mini-list">${movs.map((m) => {
+          const d = montoMostrado(m);
+          return `<div class="mini-row"><span class="dim">${fechaCorta(m.fecha)}</span><span class="grow">${esc(m.nombre)}</span><span class="${d.signo > 0 ? 'pos' : 'neg'}">${d.signo > 0 ? '+' : '−'}${clp(d.monto)}</span></div>`;
+        }).join('')}
         </div>
       </div>
     </div>`;
