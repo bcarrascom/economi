@@ -7,6 +7,7 @@ import { esc } from './format.js';
 import { initTooltips, toast, showTransferOverlay, initCensura } from './ui.js';
 import { setupCharts, destroyAll } from './charts.js';
 import { openMovimientoForm } from './forms/movimiento-form.js';
+import { openCompraForm } from './forms/compra-form.js';
 
 import * as dashboard from './views/dashboard.js';
 import * as movimientos from './views/movimientos.js';
@@ -34,10 +35,10 @@ function shell() {
       <div class="brand" data-tip="App Finanzas" data-tip-pos="right">${icon('logo')}</div>
       <nav class="nav">
         <span class="nav-ind"></span>
-        ${VIEWS.map((v) => `<button class="nav-btn ${v.meta.id === current ? 'on' : ''}" data-view="${v.meta.id}" data-tip="${v.meta.title}" data-tip-pos="right">${icon(v.meta.icon)}</button>`).join('')}
+        ${VIEWS.map((v, i) => `<button class="nav-btn ${v.meta.id === current ? 'on' : ''}" data-view="${v.meta.id}" data-tip="${v.meta.title} (Ctrl+${i + 1})" data-tip-pos="right">${icon(v.meta.icon)}</button>`).join('')}
       </nav>
       <span class="spacer"></span>
-      <button class="nav-btn add" data-act="add" data-tip="Nuevo movimiento (Ctrl+N)" data-tip-pos="right">${icon('plus')}</button>
+      <button class="nav-btn add" data-act="add" data-tip="Nuevo movimiento (Ctrl+Enter)" data-tip-pos="right">${icon('plus')}</button>
     </aside>
     <main class="main">
       <div data-el="banner"></div>
@@ -48,7 +49,7 @@ function shell() {
     const b = e.target.closest('[data-view]');
     if (b && b.dataset.view !== current) go(b.dataset.view);
   };
-  app.querySelector('[data-act="add"]').onclick = () => openMovimientoForm();
+  app.querySelector('[data-act="add"]').onclick = () => nuevoMovimiento();
   requestAnimationFrame(() => moveIndicator(true));
 }
 
@@ -126,10 +127,59 @@ function start() {
   });
 }
 
+/** Tipo ('ingreso' | 'gasto') del movimiento agregado más recientemente, para precargar el formulario. */
+function tipoUltimoMovimiento() {
+  let ultimo = null;
+  for (const m of state.movimientos) if (!ultimo || m.creado > ultimo.creado) ultimo = m;
+  return ultimo?.tipo;
+}
+
+function nuevoMovimiento(tipoForzado) {
+  openMovimientoForm(null, { tipo: tipoForzado || tipoUltimoMovimiento() });
+}
+
+/** El "+" por defecto (Ctrl+Enter/N): un movimiento en general, salvo en Compras, donde es un ítem de la lista. */
+function nuevoPorDefecto() {
+  if (current === 'compras') { openCompraForm(); return; }
+  nuevoMovimiento();
+}
+
+// Ctrl/Cmd + Enter (o N): nuevo elemento por defecto según el módulo activo (ver nuevoPorDefecto).
+// Ctrl/Cmd + G / I: nuevo movimiento forzando gasto/ingreso. Ctrl/Cmd + 1..9: salta al módulo en
+// esa posición de VIEWS (el 1 siempre es el dashboard, que no es reordenable; el resto sí a futuro).
 document.addEventListener('keydown', (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n' && state.dataDir && !document.querySelector('.overlay')) {
+  if (!(e.ctrlKey || e.metaKey) || !state.dataDir || document.querySelector('.overlay')) return;
+
+  const key = e.key.toLowerCase();
+  if (key === 'n' || e.key === 'Enter') {
     e.preventDefault();
-    openMovimientoForm();
+    nuevoPorDefecto();
+    return;
+  }
+  if (key === 'g') {
+    e.preventDefault();
+    nuevoMovimiento('gasto');
+    return;
+  }
+  if (key === 'i') {
+    e.preventDefault();
+    nuevoMovimiento('ingreso');
+    return;
+  }
+
+  const n = Number(e.key);
+  if (Number.isInteger(n) && n >= 1 && n <= VIEWS.length) {
+    e.preventDefault();
+    go(VIEWS[n - 1].meta.id);
+    return;
+  }
+
+  if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+    e.preventDefault();
+    const i = VIEWS.findIndex((v) => v.meta.id === current);
+    const dir = e.key === 'ArrowUp' ? -1 : 1;
+    const next = i < 0 ? 0 : (i + dir + VIEWS.length) % VIEWS.length;
+    go(VIEWS[next].meta.id);
   }
 });
 
