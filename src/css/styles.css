@@ -306,6 +306,9 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 16px; }
    superiores del header se redondean a mano para calzar con el borde del panel. */
 .t th:first-child { border-top-left-radius: var(--r-lg); }
 .t th:last-child { border-top-right-radius: var(--r-lg); }
+/* Tablas donde el header de columnas no necesita quedarse fijo al scrollear: el contenido
+   se entiende sin repetir los títulos de columna (Compras y Movimientos). */
+.t-head-static th { position: static; }
 .t td { padding: 7px 12px; white-space: nowrap; vertical-align: middle; transition: background .2s; }
 .t th + th, .t tr.row td + td, .t tfoot td + td { border-left: 1px solid var(--line); }
 .t .grow { width: 100%; }

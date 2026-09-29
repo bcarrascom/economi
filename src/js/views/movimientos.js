@@ -210,7 +210,7 @@ function table(root, anim) {
 
   el.innerHTML = `
     <div class="table-wrap">
-      <table class="t">
+      <table class="t t-head-static">
         <thead><tr>
           <th class="w-exp"></th>
           ${ids ? '<th>ID</th>' : ''}
