@@ -3,7 +3,7 @@
 import { state } from '../store.js';
 import {
   resumen, puntajes, serieTemporal, porMes, porTag, porArrepentimiento,
-  filtrarPorTags, enPeriodo, estadoInversion, saldoDeudas,
+  filtrarPorTags, enPeriodo, estadoInversion, saldoDeudas, montoMostrado,
 } from '../calc.js';
 import {
   clp, pct, monthLabel, currentMonthKey, scaleColor, regretColor, fechaCorta,
@@ -227,11 +227,14 @@ function recientes(b) {
     .slice(0, 6);
   const el = b.querySelector('[data-el="recent"]');
   el.innerHTML = list.length
-    ? list.map((m) => `
+    ? list.map((m) => {
+      const d = montoMostrado(m);
+      return `
         <div class="recent-row">
           <span class="recent-ico ${m.tipo}">${icon(m.tipo === 'ingreso' ? 'income' : m.esInversion ? 'invest' : 'expense')}</span>
           <span class="recent-name">${esc(m.nombre)}<small>${fechaCorta(m.fecha)}</small></span>
-          <span class="${m.tipo === 'ingreso' ? 'pos' : 'neg'}">${m.tipo === 'ingreso' ? '+' : '−'}${clp(m.monto)}</span>
-        </div>`).join('')
+          <span class="${d.signo > 0 ? 'pos' : 'neg'}">${d.signo > 0 ? '+' : '−'}${clp(d.monto)}</span>
+        </div>`;
+    }).join('')
     : '<div class="empty small">Aún no hay movimientos.</div>';
 }

@@ -23,6 +23,7 @@ La primera vez te pedirá la carpeta de datos. Cada equipo recuerda su propia ru
 | Objetivo | suma de los ítems de ahorro en la lista de compras |
 | Ideal teórico | suma de todos los ítems de la lista de compras |
 | Coeficiente | ingresos − gastos del mes o del año |
+| Reembolso | un gasto reembolsado cuenta como monto − reembolso; si el reembolso supera el monto, la diferencia cuenta como ingreso |
 
 ## Datos
 

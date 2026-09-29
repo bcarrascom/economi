@@ -2,13 +2,16 @@
 
 import * as store from '../store.js';
 import { state } from '../store.js';
-import { aporteAhorro, estadoInversion, filtrarPorTags, totalesDe } from '../calc.js';
+import {
+  aporteAhorro, estadoInversion, filtrarPorTags, totalesDe, efectoNeto, gastoEfectivo,
+} from '../calc.js';
 import {
   clp, clpSigned, pct, esc, fechaCorta, fechaHora, monthLabel, shortId, normalize,
 } from '../format.js';
 import { icon } from '../icons.js';
 import {
   segmented, bindSegmented, tagGrid, deudaCell, tagFilter, regret, statusBadge, confirmDialog, toast,
+  openModal, bindMoney,
 } from '../ui.js';
 import { openMovimientoForm } from '../forms/movimiento-form.js';
 import { openAplicarForm } from './sueldos.js';
@@ -60,8 +63,17 @@ const COL = {
     cell: (m) => { const e = estadoInversion(m, state.movimientos); return e?.retorno != null ? clp(e.retorno) : '<span class="muted">—</span>'; },
   },
   monto: {
-    k: 'monto', l: 'Monto', cls: 'num', sort: (m) => (m.tipo === 'ingreso' ? m.monto : -m.monto),
-    cell: (m) => `<span class="amount ${m.tipo === 'ingreso' ? 'pos' : 'neg'}">${m.tipo === 'ingreso' ? '+' : '−'}${clp(m.monto)}</span>`,
+    k: 'monto', l: 'Monto', cls: 'num', sort: (m) => (m.tipo === 'ingreso' ? m.monto : efectoNeto(m)),
+    cell: (m) => {
+      if (m.tipo !== 'gasto' || !m.reembolso) {
+        return `<span class="amount ${m.tipo === 'ingreso' ? 'pos' : 'neg'}">${m.tipo === 'ingreso' ? '+' : '−'}${clp(m.monto)}</span>`;
+      }
+      const ef = efectoNeto(m); // reembolso - monto
+      return `<span class="amount-stack">
+        <span class="amount-calc muted">${clp(m.monto)} − ${clp(m.reembolso)}</span>
+        <span class="amount ${ef >= 0 ? 'pos' : 'neg'}">${ef >= 0 ? '+' : '−'}${clp(Math.abs(ef))}</span>
+      </span>`;
+    },
   },
 };
 
@@ -212,6 +224,7 @@ function table(root, anim) {
               ${ids ? `<td><span class="mono dim">${shortId(m.id)}</span></td>` : ''}
               ${cols.map((c) => `<td class="${c.cls || ''}">${c.cell(m)}</td>`).join('')}
               <td class="w-act"><div class="acts">
+                ${m.tipo === 'gasto' ? `<button class="ibtn ghost xs ${m.reembolso ? 'on' : ''}" data-act="reembolso" data-tip="${m.reembolso ? `Reembolso: ${clp(m.reembolso)}` : 'Marcar reembolso'}">${icon('refund')}</button>` : ''}
                 <button class="ibtn ghost xs" data-act="edit" data-tip="Editar">${icon('edit')}</button>
                 <button class="ibtn ghost xs danger" data-act="del" data-tip="Eliminar">${icon('trash')}</button>
               </div></td>
@@ -237,6 +250,11 @@ function detalle(m) {
         <dt>Registrado</dt><dd>${fechaHora(m.creado)}${m.editado ? ` <span class="muted">· editado ${fechaHora(m.editado)}</span>` : ''}</dd>
         ${origen}
         ${m.tipo === 'ingreso' ? `<dt>Aporte al ahorro</dt><dd>${clp(aporteAhorro(m))} ${m.ahorro.modo === 'pct' ? `(${pct(m.ahorro.valor)})` : '(monto fijo)'}</dd>` : ''}
+        ${m.tipo === 'gasto' && m.reembolso ? `<dt>Reembolso</dt><dd>${clp(m.reembolso)} reembolsado de ${clp(m.monto)} — ${
+          m.reembolso > m.monto
+            ? `gasto en <b class="pos">$0</b>, con <b class="pos">${clp(m.reembolso - m.monto)}</b> de ingreso extra`
+            : `gasto neto <b class="${m.reembolso === m.monto ? '' : 'neg'}">${clp(gastoEfectivo(m))}</b>`
+        }</dd>` : ''}
         ${est ? `<dt>Invertido</dt><dd>${clp(m.monto)}</dd>
           <dt>Retorno</dt><dd>${est.retorno != null ? `${clp(est.retorno)} <span class="${est.diferencia > 0 ? 'pos' : 'neg'}">${clpSigned(est.diferencia)} (${pct(est.rentabilidad)})</span>` : 'Pendiente'}</dd>` : ''}
       </dl>
@@ -270,6 +288,7 @@ async function onTableClick(e, root) {
   const act = e.target.closest('[data-act]')?.dataset.act;
 
   if (act === 'edit' || act === 'estado') { openMovimientoForm(m); return; }
+  if (act === 'reembolso') { openReembolsoForm(m); return; }
   if (act === 'del') {
     const auto = store.autoRetorno(m);
     const ok = await confirmDialog({
@@ -286,4 +305,44 @@ async function onTableClick(e, root) {
   if (open) abiertos.add(m.id); else abiertos.delete(m.id);
   tr.classList.toggle('is-open', open);
   tr.nextElementSibling?.classList.toggle('open', open);
+}
+
+/** Marca cuánto de un gasto fue reembolsado (resta del gasto; el exceso cuenta como ingreso). */
+function openReembolsoForm(m) {
+  let el;
+  let getReembolso;
+
+  openModal({
+    title: 'Reembolso',
+    width: 420,
+    body: `
+      <div class="note">Lo reembolsado se resta del gasto «${esc(m.nombre)}»; si supera lo gastado, la diferencia cuenta como ingreso.</div>
+      <div class="field"><label>Monto reembolsado</label><div class="money"><span>$</span><input class="input" name="reembolso" inputmode="numeric" placeholder="0" value="${m.reembolso || ''}" autofocus></div></div>
+      <div class="hint" data-el="hint"></div>`,
+    onMount: (rootEl) => {
+      el = rootEl;
+      getReembolso = bindMoney(el.querySelector('[name="reembolso"]'));
+      const update = () => {
+        const reemb = getReembolso();
+        const dif = reemb - m.monto;
+        el.querySelector('[data-el="hint"]').innerHTML = dif > 0
+          ? `El gasto queda en <b class="pos">$0</b> y se registra un ingreso de <b class="pos">${clp(dif)}</b> por la diferencia.`
+          : `Gasto neto: <b class="${dif === 0 ? '' : 'neg'}">${clp(m.monto - reemb)}</b>.`;
+      };
+      el.querySelector('[name="reembolso"]').addEventListener('input', update);
+      update();
+    },
+    actions: [
+      { icon: 'close', tip: 'Cancelar', onClick: (c) => c() },
+      {
+        icon: 'check', tip: 'Guardar (Enter)', kind: 'primary', primary: true,
+        onClick: (close) => {
+          const reembolso = getReembolso();
+          store.saveMovimiento({ ...m, reembolso });
+          toast(reembolso ? 'Reembolso guardado' : 'Reembolso quitado');
+          close();
+        },
+      },
+    ],
+  });
 }

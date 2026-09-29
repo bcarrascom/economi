@@ -28,6 +28,7 @@ export function openMovimientoForm(existing = null, preset = {}) {
     ahorro: { modo: def.modo, valor: 0 },
     esInversion: !!preset.esInversion,
     desdeAhorro: false,
+    reembolso: 0,
     inversion: { ingresoId: null },
     creado: new Date().toISOString(),
   };
@@ -84,7 +85,7 @@ export function openMovimientoForm(existing = null, preset = {}) {
       <div class="collapse ${esDeuda ? 'open' : ''}" data-sec="deuda"><div><div class="inv-box">
         <div class="hint">¿Quiénes te deben por este gasto? Puedes dividirlo entre varias personas.</div>
         <div data-el="splits"></div>
-        <button type="button" class="ibtn ghost sm" data-act="addSplit">${icon('plus', 'inline')} Agregar persona</button>
+        <button type="button" class="ibtn-text" data-act="addSplit">${icon('plus', 'inline')} Agregar persona</button>
         <div class="hint" data-el="splitTotal"></div>
         <div class="row-line"><span>Plazo <span class="opt">opcional</span></span>${segmented('deudaPlazoModo', [['ninguno', 'Sin plazo'], ['dias', 'Días'], ['fecha', 'Fecha límite']], deudaPlazoModo)}</div>
         <div class="collapse ${deudaPlazoModo === 'dias' ? 'open' : ''}" data-sec="deudaDias"><div><div class="pad-top">
@@ -273,11 +274,13 @@ export function openMovimientoForm(existing = null, preset = {}) {
       m.ahorro = { modo: amodo, valor: valorAhorro() };
       m.esInversion = false;
       m.desdeAhorro = false;
+      m.reembolso = 0;
     } else {
       m.esSueldo = false;
       m.ahorro = { modo: 'pct', valor: 0 };
       m.esInversion = q('esInversion').checked;
       m.desdeAhorro = q('desdeAhorro').checked;
+      // El reembolso ya no se edita aquí: se gestiona con el botón dedicado en la tabla de Movimientos.
     }
 
     let spec = null;
