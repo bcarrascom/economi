@@ -4,7 +4,9 @@
 // Formato: { app, version, actualizado, data }
 
 import { uid, today, clamp, avanzarFecha } from './format.js';
-import { resumen, saldoDeudas, sueldoVencido } from './calc.js';
+import {
+  resumen, saldoDeudas, sueldoVencido, montoPendiente,
+} from './calc.js';
 
 const FILES = {
   movimientos: 'movimientos.json',
@@ -136,6 +138,9 @@ export function normDeuda(d = {}) {
     fechaLiquidacion: isDate(d.fechaLiquidacion) ? d.fechaLiquidacion : null,
     movId: d.movId || null,
     movAutoId: d.movAutoId || null,
+    // Pagos parciales: cada uno resta de `monto` (que sigue siendo el total original) sin
+    // cancelar la deuda. `montoPendiente()` en calc.js calcula lo que queda debiéndose.
+    abonos: Array.isArray(d.abonos) ? d.abonos : [],
     creado: d.creado || new Date().toISOString(),
     editado: d.editado || null,
   };
@@ -334,10 +339,12 @@ export function deleteMovimiento(id) {
     if (g.inversion?.ingresoId && ids.has(g.inversion.ingresoId) && !ids.has(g.id)) g.inversion.ingresoId = null;
   }
   // Deudas: si se borra el movimiento de origen, la deuda queda suelta (editable a mano);
-  // si se borra el movimiento de liquidación automática, la deuda vuelve a pendiente.
+  // si se borra el movimiento de liquidación automática, la deuda vuelve a pendiente;
+  // si se borra el de un abono parcial, ese abono se descarta y el pendiente se recalcula solo.
   for (const d of state.deudas) {
     if (d.movId === id) d.movId = null;
     if (d.movAutoId === id) { d.movAutoId = null; d.estado = 'pendiente'; d.montoLiquidado = null; d.fechaLiquidacion = null; }
+    if (d.abonos.some((a) => a.movId === id)) d.abonos = d.abonos.filter((a) => a.movId !== id);
   }
   state.movimientos = state.movimientos.filter((x) => !ids.has(x.id));
   persist('movimientos', 'deudas');
@@ -383,7 +390,7 @@ export function cancelarDeuda(id, { monto, fecha } = {}) {
 
   const origenMov = d.movId ? getMov(d.movId) : null;
   const nombreBase = origenMov?.nombre || d.nombre;
-  const montoFinal = Math.max(0, int(monto ?? d.monto));
+  const montoFinal = Math.max(0, int(monto ?? montoPendiente(d)));
   const fechaFinal = isDate(fecha) ? fecha : today();
 
   const auto = normMov({
@@ -397,7 +404,8 @@ export function cancelarDeuda(id, { monto, fecha } = {}) {
   state.movimientos.push(auto);
 
   d.estado = 'cancelada';
-  d.montoLiquidado = montoFinal;
+  // Lo realmente recuperado en total: los abonos previos más este pago final.
+  d.montoLiquidado = d.abonos.reduce((a, x) => a + x.monto, 0) + montoFinal;
   d.fechaLiquidacion = fechaFinal;
   d.movAutoId = auto.id;
   d.editado = new Date().toISOString();
@@ -407,6 +415,45 @@ export function cancelarDeuda(id, { monto, fecha } = {}) {
 
   // Se te devolvió plata: anima cómo ese valor pasa de "Saldo de deudas" a "Neto",
   // encima de la ventana entera (la cancelación suele hacerse desde el módulo de Deudas, no el Dashboard).
+  if (esFavor) {
+    emitTransferencia({ saldoAntes, saldoDespues: saldoDeudas(state.deudas), netoAntes, netoDespues: resumen(state).neto });
+  }
+}
+
+/**
+ * Abona un pago parcial a una deuda: queda pendiente por la diferencia. Si el abono cubre o
+ * supera lo que queda, se comporta como cancelarDeuda (la deuda queda completamente liquidada).
+ */
+export function abonarDeuda(id, { monto, fecha } = {}) {
+  const d = state.deudas.find((x) => x.id === id);
+  if (!d) return;
+  const montoFinal = Math.max(0, int(monto));
+  if (montoFinal >= montoPendiente(d)) { cancelarDeuda(id, { monto: montoFinal, fecha }); return; }
+
+  const esFavor = d.direccion === 'favor';
+  const saldoAntes = esFavor ? saldoDeudas(state.deudas) : 0;
+  const netoAntes = esFavor ? resumen(state).neto : 0;
+
+  const origenMov = d.movId ? getMov(d.movId) : null;
+  const nombreBase = origenMov?.nombre || d.nombre;
+  const fechaFinal = isDate(fecha) ? fecha : today();
+
+  const auto = normMov({
+    tipo: esFavor ? 'ingreso' : 'gasto',
+    fecha: fechaFinal,
+    nombre: `Abono de ${d.contraparte} ${nombreBase}`,
+    monto: montoFinal,
+    tags: origenMov ? [...origenMov.tags] : [],
+    origen: { tipo: 'deuda', deudaId: d.id, abono: true },
+  });
+  state.movimientos.push(auto);
+
+  d.abonos = [...d.abonos, { id: uid(), monto: montoFinal, fecha: fechaFinal, movId: auto.id }];
+  d.editado = new Date().toISOString();
+
+  persist('movimientos', 'deudas');
+  emit();
+
   if (esFavor) {
     emitTransferencia({ saldoAntes, saldoDespues: saldoDeudas(state.deudas), netoAntes, netoDespues: resumen(state).neto });
   }

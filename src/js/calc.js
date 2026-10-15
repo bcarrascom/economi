@@ -245,9 +245,14 @@ export function estadoDeuda(d, ref = today()) {
   return { limite, atrasada: d.estado === 'pendiente' && !!limite && limite < ref };
 }
 
+/** Cuánto queda pendiente de una deuda después de restar sus abonos parciales. */
+export function montoPendiente(d) {
+  return Math.max(0, d.monto - sum(d.abonos || [], (a) => a.monto));
+}
+
 /** Saldo neto de deudas pendientes: lo que te deben menos lo que debes. */
 export function saldoDeudas(deudas) {
-  return sum(deudas.filter((d) => d.estado === 'pendiente'), (d) => (d.direccion === 'favor' ? d.monto : -d.monto));
+  return sum(deudas.filter((d) => d.estado === 'pendiente'), (d) => (d.direccion === 'favor' ? montoPendiente(d) : -montoPendiente(d)));
 }
 
 /** ¿Ya le toca a este sueldo? Si su fecha programada ya pasó, sí; si es hoy, solo tras la hora fijada. */
