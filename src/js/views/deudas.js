@@ -2,11 +2,11 @@
 
 import * as store from '../store.js';
 import { state } from '../store.js';
-import { estadoDeuda, saldoDeudas } from '../calc.js';
+import { estadoDeuda, saldoDeudas, montoPendiente } from '../calc.js';
 import { clp, esc, fechaCorta, today } from '../format.js';
 import { icon } from '../icons.js';
 import {
-  openModal, bindMoney, confirmDialog, toast, shake, statCard, runCounts, aplicarCensura,
+  openModal, bindMoney, confirmDialog, toast, shake, statCard, runCounts, aplicarCensura, sw,
 } from '../ui.js';
 import { openDeudaForm } from '../forms/deuda-form.js';
 import { openMovimientoForm } from '../forms/movimiento-form.js';
@@ -45,7 +45,7 @@ export function render(root, { first, highlight } = {}) {
 
 function seccion(dir, titulo, ic, lista, anim) {
   const pendientes = lista.filter((d) => d.estado === 'pendiente');
-  const totalPendiente = pendientes.reduce((a, d) => a + d.monto, 0);
+  const totalPendiente = pendientes.reduce((a, d) => a + montoPendiente(d), 0);
   const ordenada = [...lista].sort((a, b) => {
     const pa = prioridad(a);
     const pb = prioridad(b);
@@ -87,11 +87,12 @@ export function card(d, i, anim) {
       </div>
       <div class="deuda-contraparte">${icon(d.direccion === 'favor' ? 'income' : 'expense')}<span>${d.contraparte ? esc(d.contraparte) : '<span class="muted">Sin nombre</span>'}</span></div>
       ${d.descripcion ? `<div class="deuda-desc">${esc(d.descripcion)}</div>` : ''}
-      <div class="deuda-monto censurable ${d.direccion === 'favor' ? 'pos' : 'neg'}">${clp(cancelada ? d.montoLiquidado : d.monto)}</div>
+      <div class="deuda-monto censurable ${d.direccion === 'favor' ? 'pos' : 'neg'}">${clp(cancelada ? d.montoLiquidado : montoPendiente(d))}${!cancelada && d.abonos.length ? ` <span class="muted small">de ${clp(d.monto)}</span>` : ''}</div>
       <div class="deuda-meta">
         <span>${fechaCorta(d.fecha)}</span>
         <span class="${est.atrasada ? 'neg' : 'muted'}">${cancelada ? `Devuelto ${fechaCorta(d.fechaLiquidacion)}` : plazoTxt}</span>
       </div>
+      ${!cancelada && d.abonos.length ? `<div class="deuda-meta"><span class="muted">${d.abonos.length === 1 ? '1 abono' : `${d.abonos.length} abonos`} · ${clp(d.abonos.reduce((a, x) => a + x.monto, 0))} pagado</span></div>` : ''}
       <div class="deuda-acts">
         ${!cancelada ? `
         <button class="ibtn ghost xs" data-act="perdonar" data-tip="Perdonar (queda como movimiento normal)">${icon('heart')}</button>
@@ -134,7 +135,7 @@ async function onClick(e, root) {
       : 'El movimiento original quedará como uno normal, sin marca de deuda.';
     const ok = await confirmDialog({
       title: 'Perdonar deuda',
-      message: `<b>${esc(d.contraparte)}</b> ya no te deberá ${clp(d.monto)}. ${d.movId ? notaMov : 'Se eliminará el registro de esta deuda.'}`,
+      message: `<b>${esc(d.contraparte)}</b> ya no te deberá ${clp(montoPendiente(d))}. ${d.movId ? notaMov : 'Se eliminará el registro de esta deuda.'}`,
       confirmIcon: 'heart',
     });
     if (ok) { store.perdonarDeuda(d.id); toast('Deuda perdonada'); }
@@ -145,6 +146,7 @@ async function onClick(e, root) {
 
 function openLiquidarForm(d) {
   const favor = d.direccion === 'favor';
+  const restante = montoPendiente(d);
   let el;
   let getMonto;
 
@@ -154,10 +156,27 @@ function openLiquidarForm(d) {
     body: `
       <div class="note">Se creará ${favor ? 'un ingreso' : 'un gasto'} automático${d.movId ? ', heredando los tags del movimiento original' : ''}.</div>
       <div class="grid-2">
-        <div class="field"><label>${favor ? '¿Cuánto te devolvieron?' : '¿Cuánto pagaste?'}</label><div class="money"><span>$</span><input class="input" name="monto" inputmode="numeric" value="${d.monto || ''}" autofocus></div></div>
+        <div class="field"><label>${favor ? '¿Cuánto te devolvieron?' : '¿Cuánto pagaste?'}</label><div class="money"><span>$</span><input class="input" name="monto" inputmode="numeric" value="${restante || ''}" autofocus></div></div>
         <div class="field"><label>Fecha</label><input class="input" type="date" name="fecha" value="${today()}"></div>
-      </div>`,
-    onMount: (rootEl) => { el = rootEl; getMonto = bindMoney(el.querySelector('[name="monto"]')); },
+      </div>
+      <div class="row-line"><span>Pago parcial</span>${sw('parcial', false)}</div>
+      <div class="hint" data-el="parcialHint"></div>`,
+    onMount: (rootEl) => {
+      el = rootEl;
+      getMonto = bindMoney(el.querySelector('[name="monto"]'));
+      const chk = el.querySelector('[name="parcial"]');
+      const hint = el.querySelector('[data-el="parcialHint"]');
+      const update = () => {
+        const puedeParcial = getMonto() > 0 && getMonto() < restante;
+        chk.disabled = !puedeParcial;
+        if (!puedeParcial) chk.checked = false;
+        hint.innerHTML = puedeParcial
+          ? `Quedarán pendientes <b>${clp(restante - getMonto())}</b> de la deuda.`
+          : 'Disponible solo si el monto es menor a lo que queda pendiente.';
+      };
+      el.querySelector('[name="monto"]').addEventListener('input', update);
+      update();
+    },
     actions: [
       { icon: 'close', tip: 'Cancelar', onClick: (c) => c() },
       {
@@ -166,8 +185,14 @@ function openLiquidarForm(d) {
           const monto = getMonto();
           const fecha = el.querySelector('[name="fecha"]').value || today();
           if (!(monto >= 0)) { shake(el.querySelector('[name="monto"]')); toast('Escribe un monto válido', 'warn'); return; }
-          store.cancelarDeuda(d.id, { monto, fecha });
-          toast('Deuda liquidada');
+          const parcial = el.querySelector('[name="parcial"]').checked && monto < restante;
+          if (parcial) {
+            store.abonarDeuda(d.id, { monto, fecha });
+            toast('Abono registrado');
+          } else {
+            store.cancelarDeuda(d.id, { monto, fecha });
+            toast('Deuda liquidada');
+          }
           close();
         },
       },
