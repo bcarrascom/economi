@@ -150,14 +150,17 @@ export function normDeuda(d = {}) {
 }
 
 /**
- * Sueldo/remuneración recurrente: cada cierto tiempo genera (o sugiere) un ingreso.
+ * Recurrente: cada cierto tiempo genera (o sugiere) un movimiento.
+ * `clase`: 'sueldo' genera un ingreso (sueldo, remuneración…); 'subscripcion' genera un gasto (cobro recurrente).
  * `monto: null` = sin monto programado, el usuario lo escribe cada vez (ej. remuneración variable).
  * `proxima` es el puntero de la próxima ocurrencia pendiente; avanza al aplicar o posponer.
+ * `activo: false` lo apaga sin borrarlo: no sugiere ni aplica nada hasta reactivarlo.
  */
 export function normSueldo(s = {}) {
   return {
     ...s,
     id: s.id || uid(),
+    clase: s.clase === 'subscripcion' ? 'subscripcion' : 'sueldo',
     nombre: String(s.nombre ?? ''),
     monto: s.monto != null && s.monto !== '' ? Math.max(0, int(s.monto)) : null,
     frecuenciaCantidad: Math.max(1, int(s.frecuenciaCantidad) || 1),
@@ -651,14 +654,41 @@ export function reabrirInversion(id) {
   emit();
 }
 
-// ---------- Sueldos ----------
+// ---------- Sueldos y subscripciones ----------
+export const getSueldo = (id) => state.sueldos.find((s) => s.id === id) || null;
+
+/** Recurrente que generó este movimiento (si todavía existe). */
+export const sueldoDeMov = (m) => (m?.origen?.tipo === 'sueldo' ? getSueldo(m.origen.sueldoId) : null);
+
+/**
+ * Al reactivar uno que estuvo apagado, sus ocurrencias perdidas no se cobran/aplican de golpe:
+ * la próxima fecha salta a la primera ocurrencia desde hoy (sin modificar `s` original).
+ */
+function realinearProxima(s) {
+  let proxima = s.proxima;
+  let guard = 0;
+  while (proxima < today() && guard++ < 5000) proxima = avanzarFecha(proxima, s.frecuenciaCantidad, s.frecuenciaUnidad);
+  return proxima;
+}
+
 export function saveSueldo(s) {
-  const existe = state.sueldos.some((x) => x.id === s.id);
-  const n = normSueldo({ ...s, editado: existe ? new Date().toISOString() : s.editado });
+  const prev = getSueldo(s.id);
+  const reactivado = prev && !prev.activo && s.activo !== false;
+  const n = normSueldo({
+    ...s,
+    proxima: reactivado ? realinearProxima(s) : s.proxima,
+    editado: prev ? new Date().toISOString() : s.editado,
+  });
   upsert(state.sueldos, n);
   persist('sueldos');
   emit();
   return n;
+}
+
+/** Enciende o apaga un sueldo/subscripción sin borrarlo. */
+export function setSueldoActivo(id, activo) {
+  const s = getSueldo(id);
+  if (s) saveSueldo({ ...s, activo });
 }
 
 export function deleteSueldo(id) {
@@ -667,21 +697,25 @@ export function deleteSueldo(id) {
   emit();
 }
 
-/** Crea el ingreso de una ocurrencia y avanza el puntero a la próxima. Usa la fecha dada, o la programada, o hoy. */
+/**
+ * Crea el movimiento de una ocurrencia (ingreso si es sueldo, gasto si es subscripción) y avanza
+ * el puntero a la próxima. Usa la fecha dada, o la programada, o hoy.
+ */
 export function aplicarSueldo(id, { monto, fecha } = {}) {
   const s = state.sueldos.find((x) => x.id === id);
   if (!s) return null;
   const def = state.ajustes.aporteDefecto;
   const fechaUsada = isDate(fecha) ? fecha : (s.proxima || today());
+  const esSueldo = s.clase === 'sueldo';
 
   const mov = normMov({
-    tipo: 'ingreso',
+    tipo: esSueldo ? 'ingreso' : 'gasto',
     fecha: fechaUsada,
     nombre: s.nombre,
     monto: monto != null ? monto : (s.monto || 0),
     tags: [...s.tags],
-    esSueldo: true,
-    ahorro: { modo: def.modo, valor: def.valor },
+    esSueldo,
+    ahorro: esSueldo ? { modo: def.modo, valor: def.valor } : { modo: 'pct', valor: 0 },
     origen: { tipo: 'sueldo', sueldoId: s.id },
   });
   state.movimientos.push(mov);
@@ -693,7 +727,7 @@ export function aplicarSueldo(id, { monto, fecha } = {}) {
   return mov;
 }
 
-/** Salta esta ocurrencia sin registrar ingreso: la sugerencia no vuelve a aparecer hasta la siguiente. */
+/** Salta esta ocurrencia sin registrar el movimiento: la sugerencia no vuelve a aparecer hasta la siguiente. */
 export function posponerSueldo(id) {
   const s = state.sueldos.find((x) => x.id === id);
   if (!s) return;
@@ -704,7 +738,7 @@ export function posponerSueldo(id) {
 }
 
 /**
- * Al abrir la app (y de nuevo al entrar a Movimientos o Sueldos) se revisan los sueldos:
+ * Al abrir la app (y de nuevo al entrar a Movimientos o Sueldos) se revisan sueldos y subscripciones:
  * los "automáticos" atrasados se aplican solos (uno por cada ocurrencia perdida, en orden);
  * los "sugeridos" se dejan tal cual — su sugerencia la calcula la UI con sueldoVencido().
  */
@@ -722,7 +756,7 @@ export function revisarSueldos() {
   return aplicados;
 }
 
-/** Sueldos "sugeridos" que ya les toca y todavía no se resolvieron (para la notificación en Movimientos). */
+/** Sueldos/subscripciones "sugeridos" que ya les toca y todavía no se resolvieron (para la notificación en Movimientos). */
 export function sueldosSugeridosPendientes() {
   return state.sueldos.filter((s) => s.modo === 'sugerido' && sueldoVencido(s));
 }

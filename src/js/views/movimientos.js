@@ -10,7 +10,7 @@ import {
 } from '../format.js';
 import { icon } from '../icons.js';
 import {
-  segmented, bindSegmented, tagGrid, deudaCell, tagFilter, regret, inversionPill, confirmDialog, toast,
+  segmented, bindSegmented, tagGrid, tagPill, deudaCell, tagFilter, regret, inversionPill, sueldoPill, confirmDialog, toast,
   openModal, bindMoney,
 } from '../ui.js';
 import { openMovimientoForm } from '../forms/movimiento-form.js';
@@ -41,17 +41,28 @@ function entradaDe(m) {
   return inv ? tipoEntrada(inv.tipo, m.tipo) : null;
 }
 
+/**
+ * Columna "Tags": un movimiento de inversión muestra la inversión en lugar de los tags; uno generado
+ * por un sueldo/subscripción muestra su pill especial antes de sus tags normales.
+ */
+function tagsCell(m) {
+  if (m.inversionId) return `<span class="pills-grid">${inversionPill(m.inversionId)}</span>`;
+  const especial = sueldoPill(m);
+  if (!especial) return tagGrid(m.tags);
+  return `<span class="pills-grid">${especial}${m.tags.map((id) => tagPill(store.tagById(id))).join('')}</span>`;
+}
+
 const typeIcon =(m) => `<span class="type-ico ${m.tipo}">${icon(m.inversionId ? 'invest' : m.tipo === 'ingreso' ? 'income' : 'expense')}</span>`;
 
 const COL = {
   fecha: { k: 'fecha', l: 'Fecha', sort: (m) => m.fecha, cell: (m) => `<span class="dim">${fechaCorta(m.fecha)}</span>` },
   nombre: {
     k: 'nombre', l: 'Nombre', cls: 'grow', sort: (m) => normalize(m.nombre),
-    cell: (m) => `<span class="name">${typeIcon(m)}<span class="name-text">${esc(m.nombre)}</span>${m.tipo === 'ingreso' && m.esSueldo ? '<span class="chip">Sueldo</span>' : ''}${m.desdeAhorro ? '<span class="chip">Desde ahorro</span>' : ''}${m.descripcion ? `<span class="has-desc" data-tip="Tiene descripción"></span>` : ''}</span>`,
+    cell: (m) => `<span class="name">${typeIcon(m)}<span class="name-text">${esc(m.nombre)}</span>${m.tipo === 'ingreso' && m.esSueldo && !store.sueldoDeMov(m) ? '<span class="chip">Sueldo</span>' : ''}${m.desdeAhorro ? '<span class="chip">Desde ahorro</span>' : ''}${m.descripcion ? `<span class="has-desc" data-tip="Tiene descripción"></span>` : ''}</span>`,
   },
   deudas: { k: 'deudas', l: 'Deudas', cell: (m) => deudaCell(m) },
   // Un movimiento de inversión no tiene tags: en su lugar se muestra la inversión de la que viene.
-  tags: { k: 'tags', l: 'Tags', cell: (m) => (m.inversionId ? `<span class="pills-grid">${inversionPill(m.inversionId)}</span>` : tagGrid(m.tags)) },
+  tags: { k: 'tags', l: 'Tags', cell: tagsCell },
   inversion: { k: 'inversion', l: 'Inversión', cell: (m) => inversionPill(m.inversionId) },
   arrep: { k: 'arrep', l: 'Arrep.', sort: (m) => m.arrepentimiento, cell: (m) => regret(m.arrepentimiento) },
   aporte: {
@@ -128,7 +139,7 @@ export function render(root, { first, tab: presetTab, mes: presetMes }) {
   table(root, first);
 }
 
-/** Sugerencias de sueldos/remuneraciones que ya les toca (modo "sugerido"), con Aplicar/Posponer. */
+/** Sugerencias de sueldos y subscripciones que ya les toca (modo "sugerido"), con Aplicar/Posponer. */
 function sueldosBanner(root, first) {
   if (first) store.revisarSueldos();
   const pendientes = store.sueldosSugeridosPendientes();
@@ -136,11 +147,11 @@ function sueldosBanner(root, first) {
   if (!pendientes.length) { el.innerHTML = ''; return; }
 
   el.innerHTML = pendientes.map((s) => `
-    <div class="card sueldo-notif" data-id="${s.id}">
+    <div class="card sueldo-notif ${s.clase}" data-id="${s.id}">
       ${icon('refresh')}
       <div class="sueldo-notif-info">
-        <b>${esc(s.nombre)}</b>
-        <span class="muted">${s.monto != null ? clp(s.monto) : 'Sin monto fijo'} · ${fechaCorta(s.proxima)}</span>
+        <b>${esc(s.nombre)} <span class="chip">${s.clase === 'sueldo' ? 'Sueldo' : 'Subscripción'}</span></b>
+        <span class="muted">${s.monto != null ? `${s.clase === 'sueldo' ? '+' : '−'}${clp(s.monto)}` : 'Sin monto fijo'} · ${fechaCorta(s.proxima)}</span>
       </div>
       <span class="spacer"></span>
       <button class="ibtn ghost sm" data-act="posponer" data-tip="Posponer hasta la próxima">${icon('close')}</button>
@@ -264,6 +275,8 @@ function detalle(m) {
 async function onTableClick(e, root) {
   const ip = e.target.closest('[data-inv]');
   if (ip) { go('inversion', { id: ip.dataset.inv }); return; }
+  const sp = e.target.closest('[data-sueldo]');
+  if (sp) { go('sueldos', { highlight: sp.dataset.sueldo }); return; }
   const dp = e.target.closest('[data-deuda]');
   if (dp) {
     const d = state.deudas.find((x) => x.id === dp.dataset.deuda);
