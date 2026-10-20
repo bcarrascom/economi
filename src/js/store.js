@@ -1,11 +1,12 @@
 // Estado de la app + persistencia en archivos JSON dentro de la carpeta elegida.
 // Cada colección vive en su propio archivo:
-//   movimientos.json · compras.json · tags.json · ajustes.json
+//   movimientos.json · compras.json · tags.json · deudas.json · sueldos.json · inversiones.json · ajustes.json
 // Formato: { app, version, actualizado, data }
 
 import { uid, today, clamp, avanzarFecha } from './format.js';
 import {
   resumen, saldoDeudas, sueldoVencido, montoPendiente,
+  entradasInversion, saldoMinimo, resumenInversion, tipoEntrada, afectaCuenta, movTipoDe, ENTRADA_LABEL,
 } from './calc.js';
 
 const FILES = {
@@ -14,6 +15,7 @@ const FILES = {
   tags: 'tags.json',
   deudas: 'deudas.json',
   sueldos: 'sueldos.json',
+  inversiones: 'inversiones.json',
   ajustes: 'ajustes.json',
 };
 const VERSION = 1;
@@ -33,6 +35,7 @@ export const state = {
   tags: [],
   deudas: [],
   sueldos: [],
+  inversiones: [],
   ajustes: structuredClone(DEFAULT_AJUSTES),
   error: null,
 };
@@ -82,10 +85,10 @@ export function normMov(m = {}) {
       modo: m.ahorro?.modo === 'fijo' ? 'fijo' : 'pct',
       valor: Math.max(0, Number(m.ahorro?.valor) || 0),
     },
-    esInversion: !!m.esInversion,
     desdeAhorro: !!m.desdeAhorro,
     reembolso: Math.max(0, int(m.reembolso)),
-    inversion: { ingresoId: m.inversion?.ingresoId || null },
+    // Movimiento que pertenece a una inversión (aporte/retiro de una externa, o ganancia/pérdida de una interna).
+    inversionId: m.inversionId || null,
     origen: m.origen || null,
     creado: m.creado || new Date().toISOString(),
     editado: m.editado || null,
@@ -169,6 +172,37 @@ export function normSueldo(s = {}) {
   };
 }
 
+/**
+ * Inversión creada a mano. Sus entradas que tocan tu cuenta son movimientos con `inversionId`;
+ * las que no (ganancias/pérdidas de una externa) viven en `variaciones`. Ver calc.js.
+ */
+export function normInversion(i = {}) {
+  return {
+    ...i,
+    id: i.id || uid(),
+    nombre: String(i.nombre ?? '').trim() || 'Sin nombre',
+    descripcion: String(i.descripcion ?? ''),
+    tipo: i.tipo === 'interna' ? 'interna' : 'externa',
+    estado: i.estado === 'completada' ? 'completada' : 'activa',
+    fechaCompletada: isDate(i.fechaCompletada) ? i.fechaCompletada : null,
+    variaciones: Array.isArray(i.variaciones) ? i.variaciones.map(normVariacion) : [],
+    creado: i.creado || new Date().toISOString(),
+    editado: i.editado || null,
+  };
+}
+
+function normVariacion(v = {}) {
+  return {
+    ...v,
+    id: v.id || uid(),
+    tipo: v.tipo === 'perdida' ? 'perdida' : 'ganancia',
+    fecha: isDate(v.fecha) ? v.fecha : today(),
+    monto: Math.max(0, int(v.monto)),
+    descripcion: String(v.descripcion ?? ''),
+    creado: v.creado || new Date().toISOString(),
+  };
+}
+
 // ---------- Índices ----------
 let tagIdx = new Map();
 const rebuild = () => { tagIdx = new Map(state.tags.map((t) => [t.id, t])); };
@@ -201,6 +235,7 @@ async function readAll() {
   state.tags = itemsOf(raw.tags).map(normTag);
   state.deudas = itemsOf(raw.deudas).map(normDeuda);
   state.sueldos = itemsOf(raw.sueldos).map(normSueldo);
+  state.inversiones = itemsOf(raw.inversiones).map(normInversion);
 
   const aj = raw.ajustes?.data ?? raw.ajustes ?? {};
   state.ajustes = {
@@ -210,7 +245,43 @@ async function readAll() {
     ajustesAhorro: Array.isArray(aj.ajustesAhorro) ? aj.ajustesAhorro : [],
   };
   rebuild();
+  if (migrarInversionesAntiguas()) persist('movimientos', 'inversiones');
   return faltantes;
+}
+
+/**
+ * Sistema anterior: un gasto marcado "Es inversión" con un ingreso de retorno opcional.
+ * Cada uno pasa a ser una inversión externa: el gasto es su aporte, el retorno su retiro (y la
+ * diferencia una ganancia o pérdida). Si tenía retorno, queda completada. Corre una sola vez:
+ * después de migrar, los campos viejos ya no existen.
+ */
+function migrarInversionesAntiguas() {
+  if (bloqueados.has('movimientos') || bloqueados.has('inversiones')) return false;
+  const viejas = state.movimientos.filter((m) => m.tipo === 'gasto' && m.esInversion && !m.inversionId);
+  for (const g of viejas) {
+    const inv = normInversion({ nombre: g.nombre, descripcion: g.descripcion, tipo: 'externa', creado: g.creado });
+    g.inversionId = inv.id;
+    const ing = g.inversion?.ingresoId ? getMov(g.inversion.ingresoId) : null;
+    if (ing && ing.tipo === 'ingreso' && !ing.inversionId) {
+      ing.inversionId = inv.id;
+      const dif = ing.monto - g.monto;
+      if (dif) {
+        inv.variaciones.push(normVariacion({
+          tipo: dif > 0 ? 'ganancia' : 'perdida', fecha: ing.fecha, monto: Math.abs(dif),
+          descripcion: 'Migrado del sistema anterior de inversiones', creado: ing.creado,
+        }));
+      }
+      inv.estado = 'completada';
+      inv.fechaCompletada = ing.fecha;
+    }
+    state.inversiones.push(inv);
+  }
+  for (const m of state.movimientos) {
+    delete m.esInversion;
+    delete m.inversion;
+    if (m.origen?.tipo === 'inversion') m.origen = null;
+  }
+  return viejas.length > 0;
 }
 
 /** Devuelve false si todavía no hay carpeta elegida. */
@@ -275,80 +346,25 @@ export function saveMovimiento(m) {
   return n;
 }
 
-/** Ingreso creado automáticamente como retorno de esta inversión (si existe). */
-export function autoRetorno(g) {
-  const id = g?.inversion?.ingresoId;
-  const ing = id ? getMov(id) : null;
-  return ing && ing.origen?.tipo === 'inversion' && ing.origen.gastoId === g.id ? ing : null;
-}
-
-/** Ingresos disponibles para vincular a una inversión. */
-export function ingresosVinculables(gastoId) {
-  const usados = new Set(state.movimientos
-    .filter((g) => g.id !== gastoId && g.inversion?.ingresoId)
-    .map((g) => g.inversion.ingresoId));
-  return state.movimientos
-    .filter((m) => m.tipo === 'ingreso' && !usados.has(m.id)
-      && !(m.origen?.tipo === 'inversion' && m.origen.gastoId !== gastoId))
-    .sort((a, b) => b.fecha.localeCompare(a.fecha));
-}
-
-/**
- * Define el resultado de una inversión.
- * spec: { modo: 'pendiente' } | { modo: 'vincular', ingresoId } | { modo: 'manual', monto, fecha }
- * "manual" crea (o actualiza) un ingreso automático con el monto recuperado.
- */
-export function resolverInversion(gastoId, spec) {
-  const g = getMov(gastoId);
-  if (!g) return;
-  const auto = autoRetorno(g);
-
-  if (spec.modo === 'manual') {
-    if (auto) {
-      auto.monto = Math.max(0, int(spec.monto));
-      auto.fecha = spec.fecha || today();
-      auto.editado = new Date().toISOString();
-    } else {
-      const ing = normMov({
-        tipo: 'ingreso',
-        fecha: spec.fecha || today(),
-        nombre: `Retorno: ${g.nombre}`,
-        monto: spec.monto,
-        tags: [...g.tags],
-        origen: { tipo: 'inversion', gastoId: g.id },
-      });
-      state.movimientos.push(ing);
-      g.inversion.ingresoId = ing.id;
-    }
-  } else {
-    if (auto) state.movimientos = state.movimientos.filter((x) => x.id !== auto.id);
-    g.inversion.ingresoId = spec.modo === 'vincular' ? spec.ingresoId : null;
-  }
-  persist('movimientos');
+export function deleteMovimiento(id) {
+  if (!getMov(id)) return;
+  quitarMovs([id]);
+  persist('movimientos', 'deudas');
   emit();
 }
 
-export function deleteMovimiento(id) {
-  const m = getMov(id);
-  if (!m) return;
-  const ids = new Set([id]);
-  const auto = autoRetorno(m);
-  if (auto) ids.add(auto.id);
-  // Si se borra un ingreso usado como retorno, la inversión vuelve a "pendiente".
-  for (const g of state.movimientos) {
-    if (g.inversion?.ingresoId && ids.has(g.inversion.ingresoId) && !ids.has(g.id)) g.inversion.ingresoId = null;
-  }
+/** Saca movimientos del estado y limpia las deudas que los referencian (sin persistir). */
+function quitarMovs(lista) {
+  const ids = new Set(lista);
   // Deudas: si se borra el movimiento de origen, la deuda queda suelta (editable a mano);
   // si se borra el movimiento de liquidación automática, la deuda vuelve a pendiente;
   // si se borra el de un abono parcial, ese abono se descarta y el pendiente se recalcula solo.
   for (const d of state.deudas) {
-    if (d.movId === id) d.movId = null;
-    if (d.movAutoId === id) { d.movAutoId = null; d.estado = 'pendiente'; d.montoLiquidado = null; d.fechaLiquidacion = null; }
-    if (d.abonos.some((a) => a.movId === id)) d.abonos = d.abonos.filter((a) => a.movId !== id);
+    if (ids.has(d.movId)) d.movId = null;
+    if (ids.has(d.movAutoId)) { d.movAutoId = null; d.estado = 'pendiente'; d.montoLiquidado = null; d.fechaLiquidacion = null; }
+    if (d.abonos.some((a) => ids.has(a.movId))) d.abonos = d.abonos.filter((a) => !ids.has(a.movId));
   }
   state.movimientos = state.movimientos.filter((x) => !ids.has(x.id));
-  persist('movimientos', 'deudas');
-  emit();
 }
 
 // ---------- Deudas ----------
@@ -457,6 +473,182 @@ export function abonarDeuda(id, { monto, fecha } = {}) {
   if (esFavor) {
     emitTransferencia({ saldoAntes, saldoDespues: saldoDeudas(state.deudas), netoAntes, netoDespues: resumen(state).neto });
   }
+}
+
+// ---------- Inversiones ----------
+export const getInversion = (id) => state.inversiones.find((i) => i.id === id) || null;
+export const entradasDe = (inv) => entradasInversion(inv, state.movimientos);
+export const resumenDe = (inv) => resumenInversion(inv, state.movimientos);
+
+const nombreAuto = (tipo, inv) => `${ENTRADA_LABEL[tipo]} · ${inv.nombre}`;
+
+export function saveInversion(i) {
+  const existe = state.inversiones.some((x) => x.id === i.id);
+  const n = normInversion({ ...i, editado: existe ? new Date().toISOString() : i.editado });
+  upsert(state.inversiones, n);
+  persist('inversiones');
+  emit();
+  return n;
+}
+
+/** Elimina la inversión junto con sus movimientos (el neto vuelve a como si nunca hubiera existido). */
+export function deleteInversion(id) {
+  quitarMovs(state.movimientos.filter((m) => m.inversionId === id).map((m) => m.id));
+  state.inversiones = state.inversiones.filter((i) => i.id !== id);
+  persist('inversiones', 'movimientos', 'deudas');
+  emit();
+}
+
+/**
+ * Revisa si a la inversión se le puede quitar la entrada `quitar` (id) y agregar `entrada`
+ * ({ tipo, fecha, monto }) sin que su saldo quede negativo en algún momento.
+ * Devuelve { error } si no se puede, o { gananciaExtra } si es un retiro mayor al saldo: en vez
+ * de rechazarlo, se asume que la inversión ganó esa diferencia (se registra como ganancia).
+ */
+export function revisarEntrada(inv, { quitar = null, entrada = null } = {}) {
+  if (!inv) return {};
+  if (inv.estado === 'completada') return { error: `«${inv.nombre}» está completada. Reábrela para modificar sus movimientos.` };
+  if (inv.tipo !== 'externa') return {};
+  const base = entradasDe(inv).filter((e) => e.id !== quitar);
+  const nueva = entrada ? [{ ...entrada, creado: new Date().toISOString() }] : [];
+  const min = saldoMinimo([...base, ...nueva]);
+  if (min >= 0) return {};
+  if (entrada?.tipo === 'retiro') {
+    const extra = { tipo: 'ganancia', fecha: entrada.fecha, monto: -min };
+    if (saldoMinimo([...base, ...nueva, extra]) >= 0) return { gananciaExtra: -min };
+  }
+  return { error: `El saldo de «${inv.nombre}» quedaría negativo.` };
+}
+
+/**
+ * Lo mismo que revisarEntrada, pero para un movimiento editado desde fuera de la inversión:
+ * `antes`/`despues` son el movimiento original y el nuevo (null = se crea / se borra).
+ */
+export function revisarCambioMov(antes, despues) {
+  const invAntes = antes?.inversionId ? getInversion(antes.inversionId) : null;
+  const invDesp = despues?.inversionId ? getInversion(despues.inversionId) : null;
+  if (invAntes && invAntes !== invDesp) {
+    const r = revisarEntrada(invAntes, { quitar: antes.id });
+    if (r.error) return r;
+  }
+  if (!invDesp) return {};
+  return revisarEntrada(invDesp, {
+    quitar: invAntes === invDesp ? antes.id : null,
+    entrada: { tipo: tipoEntrada(invDesp.tipo, despues.tipo), fecha: despues.fecha, monto: despues.monto },
+  });
+}
+
+/** Registra una ganancia que no toca tu cuenta (ver revisarEntrada). Sin persistir. */
+function agregarGananciaExtra(inv, fecha, monto) {
+  if (!(monto > 0)) return;
+  inv.variaciones.push(normVariacion({ tipo: 'ganancia', fecha, monto, descripcion: 'Registrada automáticamente al retirar más que el saldo' }));
+}
+
+/** Guarda un movimiento del formulario general que pertenece a una inversión, con su posible ganancia extra. */
+export function saveMovimientoConInversion(m, { gananciaExtra = 0 } = {}) {
+  const inv = m.inversionId ? getInversion(m.inversionId) : null;
+  if (inv && gananciaExtra > 0) {
+    agregarGananciaExtra(inv, m.fecha, gananciaExtra);
+    persist('inversiones');
+  }
+  return saveMovimiento(m);
+}
+
+/**
+ * Crea o edita una entrada desde la página de la inversión. Si cambia de tipo entre una que
+ * toca tu cuenta (movimiento) y una que no (variación), se mueve de un lado al otro.
+ * entrada: { id?, tipo, fecha, monto, descripcion }
+ */
+export function saveEntrada(invId, e, { gananciaExtra = 0 } = {}) {
+  const inv = getInversion(invId);
+  if (!inv) return;
+  const ahora = new Date().toISOString();
+  const prevMov = e.id ? state.movimientos.find((m) => m.id === e.id && m.inversionId === invId) : null;
+  const prevVar = e.id ? inv.variaciones.find((v) => v.id === e.id) : null;
+  const id = e.id || uid();
+  const creado = prevMov?.creado || prevVar?.creado;
+
+  agregarGananciaExtra(inv, e.fecha, gananciaExtra);
+
+  if (afectaCuenta(inv.tipo, e.tipo)) {
+    if (prevVar) inv.variaciones = inv.variaciones.filter((v) => v.id !== id);
+    // Conserva un nombre puesto a mano; si era el automático, se regenera según el nuevo tipo.
+    const tipoPrev = prevMov ? tipoEntrada(inv.tipo, prevMov.tipo) : null;
+    const nombre = prevMov && prevMov.nombre !== nombreAuto(tipoPrev, inv) ? prevMov.nombre : nombreAuto(e.tipo, inv);
+    upsert(state.movimientos, normMov({
+      ...(prevMov || {}),
+      id,
+      tipo: movTipoDe(e.tipo),
+      fecha: e.fecha,
+      monto: e.monto,
+      nombre,
+      descripcion: e.descripcion,
+      tags: [],
+      inversionId: inv.id,
+      creado,
+      editado: prevMov || prevVar ? ahora : null,
+    }));
+  } else {
+    if (prevMov) quitarMovs([id]);
+    upsert(inv.variaciones, normVariacion({
+      ...(prevVar || {}), id, tipo: e.tipo, fecha: e.fecha, monto: e.monto, descripcion: e.descripcion, creado,
+    }));
+  }
+  inv.editado = ahora;
+  persist('inversiones', 'movimientos', 'deudas');
+  emit();
+}
+
+export function deleteEntrada(invId, id) {
+  const inv = getInversion(invId);
+  if (!inv) return;
+  if (state.movimientos.some((m) => m.id === id && m.inversionId === invId)) quitarMovs([id]);
+  else inv.variaciones = inv.variaciones.filter((v) => v.id !== id);
+  inv.editado = new Date().toISOString();
+  persist('inversiones', 'movimientos', 'deudas');
+  emit();
+}
+
+/**
+ * Completa una inversión. En una externa, `recibido` es lo que te llevas al cerrarla: se registra
+ * como retiro, y la diferencia con el saldo que quedaba, como ganancia o pérdida (el saldo queda en 0).
+ */
+export function completarInversion(id, { recibido = 0, fecha } = {}) {
+  const inv = getInversion(id);
+  if (!inv) return;
+  const fechaFinal = isDate(fecha) ? fecha : today();
+  if (inv.tipo === 'externa') {
+    const { saldo } = resumenDe(inv);
+    const monto = Math.max(0, int(recibido));
+    const dif = monto - saldo;
+    if (dif) {
+      inv.variaciones.push(normVariacion({
+        tipo: dif > 0 ? 'ganancia' : 'perdida', fecha: fechaFinal, monto: Math.abs(dif),
+        descripcion: dif > 0 ? 'Ganancia al cerrar la inversión' : 'Pérdida al cerrar la inversión',
+      }));
+    }
+    if (monto > 0) {
+      state.movimientos.push(normMov({
+        tipo: 'ingreso', fecha: fechaFinal, nombre: `Cierre · ${inv.nombre}`, monto, inversionId: inv.id,
+      }));
+    }
+  }
+  inv.estado = 'completada';
+  inv.fechaCompletada = fechaFinal;
+  inv.editado = new Date().toISOString();
+  persist('inversiones', 'movimientos');
+  emit();
+}
+
+/** Vuelve a dejarla activa (para corregir errores o seguir invirtiendo). No deshace lo registrado al cerrarla. */
+export function reabrirInversion(id) {
+  const inv = getInversion(id);
+  if (!inv) return;
+  inv.estado = 'activa';
+  inv.fechaCompletada = null;
+  inv.editado = new Date().toISOString();
+  persist('inversiones');
+  emit();
 }
 
 // ---------- Sueldos ----------

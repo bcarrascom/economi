@@ -3,7 +3,7 @@
 import { state } from '../store.js';
 import {
   resumen, puntajes, serieTemporal, porMes, porTag, porArrepentimiento,
-  filtrarPorTags, enPeriodo, estadoInversion, saldoDeudas, montoMostrado,
+  filtrarPorTags, enPeriodo, resumenInversion, saldoDeudas, montoMostrado,
 } from '../calc.js';
 import {
   clp, pct, monthLabel, currentMonthKey, scaleColor, regretColor, fechaCorta,
@@ -31,6 +31,7 @@ const NAV = {
   coef: () => go('movimientos', { tab: 'todos', mes: currentMonthKey() }),
   objetivo: () => go('compras'),
   deudas: () => go('deudas'),
+  inversiones: () => go('inversiones'),
 };
 
 export function render(root, { first }) {
@@ -108,7 +109,7 @@ function body(root, anim) {
       <div class="card chart-card span-2"><div class="chart-title"><h4>Ingresos y gastos por mes</h4><span class="legend-inline"><i style="--c:${COLORS.green}"></i>Ingresos<i style="--c:${COLORS.red}"></i>Gastos<i class="ln" style="--c:${COLORS.accent}"></i>Coeficiente</span></div><div class="chart-box"><canvas data-c="mensual"></canvas></div></div>
       <div class="card chart-card"><div class="chart-title"><h4>Gastos por tag</h4><span class="muted">${nombreP}</span></div><div class="chart-box"><canvas data-c="tags"></canvas></div></div>
       <div class="card chart-card"><div class="chart-title"><h4>Gasto según arrepentimiento</h4></div><div class="chart-box"><canvas data-c="arrep"></canvas></div></div>
-      <div class="card chart-card"><div class="chart-title"><h4>Inversiones</h4></div><div class="chart-box"><canvas data-c="inv"></canvas></div></div>
+      <div class="card chart-card clickable" data-nav="inversiones"><div class="chart-title"><h4>Inversiones</h4></div><div class="chart-box"><canvas data-c="inv"></canvas></div></div>
       <div class="card chart-card"><div class="chart-title"><h4>Presupuesto de ahorro</h4></div><div class="chart-box tall"><canvas data-c="ahorro"></canvas></div></div>
     </section>`;
 
@@ -199,18 +200,18 @@ function charts(b, anim) {
     }, anim);
   } else empty(cR, 'Sin gastos registrados');
 
-  // Inversiones
-  const inv = movsF.filter((m) => m.tipo === 'gasto' && m.esInversion).map((g) => estadoInversion(g, state.movimientos));
+  // Inversiones (no se filtran por tags: sus movimientos no llevan tags)
+  const inv = state.inversiones.map((i) => resumenInversion(i, state.movimientos));
   const cI = cv('inv');
   if (inv.length) {
     const count = (e) => inv.filter((x) => x.estado === e).length;
     chart(cI, 'd-inv', {
       type: 'doughnut',
       data: {
-        labels: ['Ganancia', 'Pérdida', 'Pendiente'],
+        labels: ['Ganancia', 'Pérdida', 'Activa', 'Sin cambio'],
         datasets: [{
-          data: [count('ganancia'), count('perdida'), count('pendiente')],
-          backgroundColor: [hexToRgba(COLORS.green, 0.7), hexToRgba(COLORS.red, 0.7), hexToRgba(COLORS.orange, 0.7)],
+          data: [count('ganancia'), count('perdida'), count('activa'), count('neutra')],
+          backgroundColor: [hexToRgba(COLORS.green, 0.7), hexToRgba(COLORS.red, 0.7), hexToRgba(COLORS.accent, 0.7), 'rgba(255, 255, 255, 0.18)'],
           borderColor: 'rgba(10, 12, 20, 0.9)',
           borderWidth: 2,
           hoverOffset: 6,
@@ -231,7 +232,7 @@ function recientes(b) {
       const d = montoMostrado(m);
       return `
         <div class="recent-row">
-          <span class="recent-ico ${m.tipo}">${icon(m.tipo === 'ingreso' ? 'income' : m.esInversion ? 'invest' : 'expense')}</span>
+          <span class="recent-ico ${m.tipo}">${icon(m.inversionId ? 'invest' : m.tipo === 'ingreso' ? 'income' : 'expense')}</span>
           <span class="recent-name">${esc(m.nombre)}<small>${fechaCorta(m.fecha)}</small></span>
           <span class="${d.signo > 0 ? 'pos' : 'neg'}">${d.signo > 0 ? '+' : '−'}${clp(d.monto)}</span>
         </div>`;

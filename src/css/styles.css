@@ -569,6 +569,31 @@ button.historial-btn { appearance: none; -webkit-appearance: none; font: inherit
 .deuda-acts { display: flex; gap: 6px; margin-top: 2px; }
 .deuda-acts .ibtn { flex: 1; }
 
+/* ---------- Inversiones ---------- */
+.dash-stats.three { grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0 0 4px; }
+.inv-card { cursor: pointer; }
+.inv-card .chip { margin-left: 0; flex: none; }
+.inv-card .deuda-meta b { font-weight: 550; color: var(--text-2); }
+/* Completadas: borde y brillo del color del resultado (verde ganó, rojo perdió). */
+.inv-card.completada { border-color: color-mix(in srgb, var(--c) 40%, var(--line)); background: color-mix(in srgb, var(--c) 5%, var(--glass)); }
+.inv-desc { padding: 12px 16px; margin-bottom: 12px; font-size: var(--fs-sm); }
+.inv-detalle { display: inline-flex; flex-direction: column; gap: 1px; white-space: normal; }
+.inv-detalle .muted { font-size: var(--fs-xs); }
+.page-head .subtitle .status { cursor: default; margin-left: 2px; }
+.inv-charts { margin-top: 12px; }
+.chart-card.clickable { cursor: pointer; transition: border-color .3s, transform .3s var(--ease); }
+.chart-card.clickable:hover { border-color: var(--line-2); transform: translateY(-2px); }
+
+/* Pill de inversión en Movimientos (va en lugar de los tags): ícono en vez del punto. */
+.pill.inv { cursor: pointer; gap: 4px; padding-left: 6px; }
+.pill.inv::before { display: none; }
+.pill.inv:hover { background: color-mix(in srgb, var(--c) 18%, transparent); }
+.pill-ico { width: 11px; height: 11px; color: var(--c); flex: none; }
+
+/* Formularios */
+.seg.is-disabled { opacity: .45; pointer-events: none; }
+.fields { display: flex; flex-direction: column; gap: 14px; }
+
 /* Filas para dividir un gasto marcado como deuda entre varias personas. */
 .split-row { display: flex; align-items: center; gap: 6px; }
 .split-row + .split-row { margin-top: 6px; }
