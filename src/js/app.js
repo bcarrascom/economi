@@ -13,6 +13,8 @@ import * as dashboard from './views/dashboard.js';
 import * as movimientos from './views/movimientos.js';
 import * as sueldos from './views/sueldos.js';
 import * as deudas from './views/deudas.js';
+import * as inversiones from './views/inversiones.js';
+import * as inversion from './views/inversion.js';
 import * as mensual from './views/mensual.js';
 import * as compras from './views/compras.js';
 import * as tags from './views/tags.js';
@@ -20,9 +22,9 @@ import * as ajustes from './views/ajustes.js';
 import * as historial from './views/historial.js';
 
 // VIEWS: aparecen en la barra lateral. HIDDEN_VIEWS: solo se llega por navegación directa
-// (por ejemplo el botón "Historial" dentro de Deudas), nunca se listan en el nav.
+// (por ejemplo el botón "Historial" dentro de Deudas, o la página de una inversión), nunca se listan en el nav.
 const VIEWS = [dashboard, movimientos, sueldos, deudas, mensual, compras, tags, ajustes];
-const HIDDEN_VIEWS = [historial];
+const HIDDEN_VIEWS = [historial, inversiones, inversion];
 const ALL_VIEWS = [...VIEWS, ...HIDDEN_VIEWS];
 let current = 'dashboard';
 let navOpts = {};
@@ -47,11 +49,21 @@ function shell() {
 
   app.querySelector('.nav').onclick = (e) => {
     const b = e.target.closest('[data-view]');
-    if (b && b.dataset.view !== current) go(b.dataset.view);
+    if (!b) return;
+    const destino = b.dataset.view === 'progresion' ? ultimaProgresion : b.dataset.view;
+    if (destino !== current) go(destino);
   };
   app.querySelector('[data-act="add"]').onclick = () => nuevoMovimiento();
   requestAnimationFrame(() => moveIndicator(true));
 }
+
+// Las vistas ocultas marcan en el nav a su "padre" (Inversiones y la página de una inversión → Progresión).
+const NAV_PADRE = { historial: 'deudas', inversiones: 'progresion', inversion: 'progresion' };
+
+/** Pestañas del encabezado del módulo Progresión: cada una es su propia vista. */
+export const SECCIONES_PROGRESION = [['progresion', 'Progresión'], ['inversiones', 'Inversiones']];
+// Al volver a Progresión desde la barra lateral, se abre la última pestaña usada.
+let ultimaProgresion = 'progresion';
 
 function moveIndicator(instant = false) {
   const ind = app.querySelector('.nav-ind');
@@ -72,7 +84,8 @@ function banner() {
 export function go(id, opts = {}) {
   current = id;
   navOpts = opts;
-  app.querySelectorAll('.nav-btn[data-view]').forEach((b) => b.classList.toggle('on', b.dataset.view === id));
+  if (SECCIONES_PROGRESION.some(([v]) => v === id)) ultimaProgresion = id;
+  app.querySelectorAll('.nav-btn[data-view]').forEach((b) => b.classList.toggle('on', b.dataset.view === (NAV_PADRE[id] || id)));
   moveIndicator();
   const main = app.querySelector('.main');
   main.scrollTop = 0;

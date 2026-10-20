@@ -202,17 +202,30 @@ export function regret(r = 0) {
   return `<span class="regret" data-tip="Arrepentimiento ${v} de 5"><span class="bars">${bars}</span><b style="color:${c}">${v}</b></span>`;
 }
 
-const ESTADOS = {
-  pendiente: ['var(--orange)', 'Pendiente'],
+// Estados de una inversión según resumenInversion(): activa, o completada con ganancia/pérdida/sin cambio.
+const ESTADOS_INV = {
+  activa: ['var(--accent)', 'Activa'],
   ganancia: ['var(--green)', 'Ganancia'],
   perdida: ['var(--red)', 'Pérdida'],
+  neutra: ['var(--text-3)', 'Sin cambio'],
 };
 
-export function statusBadge(est) {
-  if (!est) return '<span class="muted">—</span>';
-  const [c, label] = ESTADOS[est.estado];
-  const diff = est.diferencia != null ? `<span class="status-diff">${clpSigned(est.diferencia)}</span>` : '';
-  return `<span class="status" style="--c:${c}"><span class="dot${est.estado === 'pendiente' ? ' pulse' : ''}"></span>${label}${diff}</span>`;
+/** Color del estado de una inversión (los mismos que statusBadge). */
+export const colorInversion = (estado) => (ESTADOS_INV[estado] || ESTADOS_INV.activa)[0];
+
+export function statusBadge(r) {
+  if (!r) return '<span class="muted">—</span>';
+  const [c, label] = ESTADOS_INV[r.estado];
+  const diff = r.estado !== 'activa' ? `<span class="status-diff">${clpSigned(r.resultado)}</span>` : '';
+  return `<span class="status" style="--c:${c}"><span class="dot${r.estado === 'activa' ? ' pulse' : ''}"></span>${label}${diff}</span>`;
+}
+
+/** Pill de la inversión a la que pertenece un movimiento (va en lugar de los tags). Click → su página. */
+export function inversionPill(invId) {
+  const inv = store.getInversion(invId);
+  if (!inv) return '<span class="muted">—</span>';
+  const c = colorInversion(store.resumenDe(inv).estado);
+  return `<span class="pill inv" style="--c:${c}" data-inv="${inv.id}" data-tip="Ver inversión">${icon('invest', 'pill-ico')}${esc(inv.nombre)}</span>`;
 }
 
 export const yesNo = (v) => (v == null

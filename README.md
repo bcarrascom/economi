@@ -19,19 +19,25 @@ La primera vez te pedirá la carpeta de datos. Cada equipo recuerda su propia ru
 
 | Término | Cálculo |
 |---|---|
-| Neto | saldo inicial + ingresos − gastos (las inversiones cuentan como gasto) |
+| Neto | saldo inicial + ingresos − gastos (los aportes a inversiones externas cuentan como gasto) |
 | Presupuesto de ahorro | ahorro inicial + aportes de ingresos + ajustes manuales − gastos pagados desde el ahorro |
 | Bolsillo | neto − presupuesto de ahorro |
 | Objetivo | suma de los ítems de ahorro en la lista de compras |
 | Ideal teórico | suma de todos los ítems de la lista de compras |
 | Coeficiente | ingresos − gastos del mes o del año |
 | Reembolso | un gasto reembolsado cuenta como monto − reembolso; si el reembolso supera el monto, la diferencia cuenta como ingreso |
+| Inversión externa | la plata sale de tu cuenta: aporte = gasto, retiro = ingreso; ganancias y pérdidas solo cambian la inversión |
+| Inversión interna | la plata se mueve directo en tu cuenta: cada gasto es una pérdida y cada ingreso una ganancia |
+| Saldo (externa) | aportes + ganancias − pérdidas − retiros: lo que realmente hay dentro |
+| Monto (externa) | aportes + ganancias − pérdidas: lo que vale en teoría (retirar no lo cambia) |
+| Resultado | ganancias − pérdidas; al completarla, la inversión se muestra verde o roja según su signo |
 
 ## Datos
 
 ```
 app-finanzas/
-├── movimientos.json   ingresos, gastos e inversiones
+├── movimientos.json   ingresos y gastos (los de una inversión llevan inversionId)
+├── inversiones.json   inversiones + sus ganancias/pérdidas que no tocan tu cuenta
 ├── compras.json       lista de compras
 ├── tags.json          tags (nombre + color)
 ├── ajustes.json       saldos iniciales, aporte por defecto, ajustes de ahorro
@@ -60,7 +66,7 @@ src/js/
 ├── ui.js                pills, switches, segmentados, modales, toasts, tooltips
 ├── charts.js            tema de Chart.js
 ├── forms/               formularios de movimiento, compra y tag
-└── views/               dashboard, movimientos, mensual, compras, tags, ajustes
+└── views/               dashboard, movimientos, progresión (mensual.js) con su pestaña de inversiones (+ página de cada una), compras, tags, ajustes
 ```
 
 ## Personalizar

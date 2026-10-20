@@ -1,16 +1,16 @@
-// Movimientos: tabla combinada + tablas separadas de ingresos, gastos e inversiones.
+// Movimientos: tabla combinada + tablas separadas de ingresos, gastos y movimientos de inversiones.
 
 import * as store from '../store.js';
 import { state } from '../store.js';
 import {
-  aporteAhorro, estadoInversion, filtrarPorTags, totalesDe, efectoNeto, gastoEfectivo,
+  aporteAhorro, filtrarPorTags, totalesDe, efectoNeto, gastoEfectivo, tipoEntrada, ENTRADA_LABEL,
 } from '../calc.js';
 import {
   clp, clpSigned, pct, esc, fechaCorta, fechaHora, monthLabel, shortId, normalize,
 } from '../format.js';
 import { icon } from '../icons.js';
 import {
-  segmented, bindSegmented, tagGrid, deudaCell, tagFilter, regret, statusBadge, confirmDialog, toast,
+  segmented, bindSegmented, tagGrid, deudaCell, tagFilter, regret, inversionPill, confirmDialog, toast,
   openModal, bindMoney,
 } from '../ui.js';
 import { openMovimientoForm } from '../forms/movimiento-form.js';
@@ -35,7 +35,13 @@ const tieneDeuda = (m) => store.deudasDeMov(m.id).length > 0 || !!store.deudaLiq
 /** ¿Tiene una deuda (como origen) todavía sin cancelar? */
 const tieneDeudaPendiente = (m) => store.deudasDeMov(m.id).some((d) => d.estado !== 'cancelada');
 
-const typeIcon = (m) => `<span class="type-ico ${m.tipo}">${icon(m.tipo === 'ingreso' ? 'income' : m.esInversion ? 'invest' : 'expense')}</span>`;
+/** Aporte/retiro/ganancia/pérdida que representa este movimiento en su inversión (o null). */
+function entradaDe(m) {
+  const inv = m.inversionId ? store.getInversion(m.inversionId) : null;
+  return inv ? tipoEntrada(inv.tipo, m.tipo) : null;
+}
+
+const typeIcon =(m) => `<span class="type-ico ${m.tipo}">${icon(m.inversionId ? 'invest' : m.tipo === 'ingreso' ? 'income' : 'expense')}</span>`;
 
 const COL = {
   fecha: { k: 'fecha', l: 'Fecha', sort: (m) => m.fecha, cell: (m) => `<span class="dim">${fechaCorta(m.fecha)}</span>` },
@@ -44,7 +50,9 @@ const COL = {
     cell: (m) => `<span class="name">${typeIcon(m)}<span class="name-text">${esc(m.nombre)}</span>${m.tipo === 'ingreso' && m.esSueldo ? '<span class="chip">Sueldo</span>' : ''}${m.desdeAhorro ? '<span class="chip">Desde ahorro</span>' : ''}${m.descripcion ? `<span class="has-desc" data-tip="Tiene descripción"></span>` : ''}</span>`,
   },
   deudas: { k: 'deudas', l: 'Deudas', cell: (m) => deudaCell(m) },
-  tags: { k: 'tags', l: 'Tags', cell: (m) => tagGrid(m.tags) },
+  // Un movimiento de inversión no tiene tags: en su lugar se muestra la inversión de la que viene.
+  tags: { k: 'tags', l: 'Tags', cell: (m) => (m.inversionId ? `<span class="pills-grid">${inversionPill(m.inversionId)}</span>` : tagGrid(m.tags)) },
+  inversion: { k: 'inversion', l: 'Inversión', cell: (m) => inversionPill(m.inversionId) },
   arrep: { k: 'arrep', l: 'Arrep.', sort: (m) => m.arrepentimiento, cell: (m) => regret(m.arrepentimiento) },
   aporte: {
     k: 'aporte', l: 'Al ahorro', cls: 'num', sort: aporteAhorro,
@@ -53,14 +61,9 @@ const COL = {
       return a ? `<span class="pos">${clp(a)}</span>${m.ahorro.modo === 'pct' ? ` <span class="muted">${pct(m.ahorro.valor, 1)}</span>` : ''}` : '<span class="muted">—</span>';
     },
   },
-  estado: {
-    k: 'estado', l: 'Estado',
-    sort: (m) => ({ pendiente: 0, perdida: 1, ganancia: 2 }[estadoInversion(m, state.movimientos)?.estado] ?? -1),
-    cell: (m) => `<span data-act="estado">${statusBadge(estadoInversion(m, state.movimientos))}</span>`,
-  },
-  retorno: {
-    k: 'retorno', l: 'Retorno', cls: 'num', sort: (m) => estadoInversion(m, state.movimientos)?.retorno ?? -1,
-    cell: (m) => { const e = estadoInversion(m, state.movimientos); return e?.retorno != null ? clp(e.retorno) : '<span class="muted">—</span>'; },
+  entrada: {
+    k: 'entrada', l: 'Tipo', sort: entradaDe,
+    cell: (m) => { const t = entradaDe(m); return t ? `<span class="dim">${ENTRADA_LABEL[t]}</span>` : '<span class="muted">—</span>'; },
   },
   monto: {
     k: 'monto', l: 'Monto', cls: 'num', sort: (m) => (m.tipo === 'ingreso' ? m.monto : efectoNeto(m)),
@@ -80,8 +83,8 @@ const COL = {
 const COLS = {
   todos: ['fecha', 'nombre', 'deudas', 'tags', 'arrep', 'monto'],
   ingreso: ['fecha', 'nombre', 'deudas', 'tags', 'arrep', 'aporte', 'monto'],
-  gasto: ['fecha', 'nombre', 'deudas', 'tags', 'arrep', 'estado', 'monto'],
-  inversion: ['fecha', 'nombre', 'deudas', 'tags', 'arrep', 'estado', 'retorno', 'monto'],
+  gasto: ['fecha', 'nombre', 'deudas', 'tags', 'arrep', 'monto'],
+  inversion: ['fecha', 'nombre', 'inversion', 'entrada', 'monto'],
 };
 
 export function render(root, { first, tab: presetTab, mes: presetMes }) {
@@ -113,7 +116,7 @@ export function render(root, { first, tab: presetTab, mes: presetMes }) {
 
   bindSegmented(root, 'tab', (v) => { tab = v; table(root, true); });
   root.querySelector('[data-act="nuevo"]').onclick = () => openMovimientoForm(null, {
-    tipo: tab === 'ingreso' ? 'ingreso' : 'gasto', esInversion: tab === 'inversion',
+    tipo: tab === 'ingreso' ? 'ingreso' : 'gasto',
   });
   root.querySelector('[data-act="ids"]').onclick = () => store.updateAjustes({ mostrarIds: !state.ajustes.mostrarIds });
   root.querySelector('[data-el="q"]').oninput = (e) => { busqueda = e.target.value; table(root, false); };
@@ -160,7 +163,7 @@ function lista() {
   let list = state.movimientos.filter((m) => {
     if (tab === 'ingreso' && m.tipo !== 'ingreso') return false;
     if (tab === 'gasto' && m.tipo !== 'gasto') return false;
-    if (tab === 'inversion' && !(m.tipo === 'gasto' && m.esInversion)) return false;
+    if (tab === 'inversion' && !m.inversionId) return false;
     if (mes && !m.fecha.startsWith(mes)) return false;
     if (q && !normalize(`${m.nombre} ${m.descripcion}`).includes(q)) return false;
     if (filtroDeudas === 'deudas' && !tieneDeuda(m)) return false;
@@ -195,9 +198,9 @@ function table(root, anim) {
 
   root.querySelector('[data-el="sum"]').innerHTML = `
     <span><b>${list.length}</b> ${list.length === 1 ? 'movimiento' : 'movimientos'}</span>
-    ${tab !== 'gasto' && tab !== 'inversion' ? `<span>Ingresos <b class="pos">${clp(t.ingresos)}</b></span>` : ''}
+    ${tab !== 'gasto' ? `<span>Ingresos <b class="pos">${clp(t.ingresos)}</b></span>` : ''}
     ${tab !== 'ingreso' ? `<span>Gastos <b class="neg">${clp(t.gastos)}</b></span>` : ''}
-    ${tab === 'todos' ? `<span>Balance <b class="${t.coef >= 0 ? 'pos' : 'neg'}">${clpSigned(t.coef)}</b></span>` : ''}`;
+    ${tab === 'todos' || tab === 'inversion' ? `<span>Balance <b class="${t.coef >= 0 ? 'pos' : 'neg'}">${clpSigned(t.coef)}</b></span>` : ''}`;
 
   const el = root.querySelector('[data-el="table"]');
   if (!list.length) {
@@ -224,7 +227,7 @@ function table(root, anim) {
               ${ids ? `<td><span class="mono dim">${shortId(m.id)}</span></td>` : ''}
               ${cols.map((c) => `<td class="${c.cls || ''}">${c.cell(m)}</td>`).join('')}
               <td class="w-act"><div class="acts">
-                ${m.tipo === 'gasto' ? `<button class="ibtn ghost xs ${m.reembolso ? 'on' : ''}" data-act="reembolso" data-tip="${m.reembolso ? `Reembolso: ${clp(m.reembolso)}` : 'Marcar reembolso'}">${icon('refund')}</button>` : ''}
+                ${m.tipo === 'gasto' && !m.inversionId ? `<button class="ibtn ghost xs ${m.reembolso ? 'on' : ''}" data-act="reembolso" data-tip="${m.reembolso ? `Reembolso: ${clp(m.reembolso)}` : 'Marcar reembolso'}">${icon('refund')}</button>` : ''}
                 <button class="ibtn ghost xs" data-act="edit" data-tip="Editar">${icon('edit')}</button>
                 <button class="ibtn ghost xs danger" data-act="del" data-tip="Eliminar">${icon('trash')}</button>
               </div></td>
@@ -236,12 +239,10 @@ function table(root, anim) {
 }
 
 function detalle(m) {
-  const est = estadoInversion(m, state.movimientos);
+  const inv = m.inversionId ? store.getInversion(m.inversionId) : null;
   const origen = m.origen?.tipo === 'compra'
     ? `<dt>Origen</dt><dd>Comprado desde la lista de compras${m.origen.esAhorro ? ' (ahorro)' : ''}${m.origen.costoLista != null && m.origen.costoLista !== m.monto ? ` <span class="muted">· precio en lista: ${clp(m.origen.costoLista)}</span>` : ''}</dd>`
-    : m.origen?.tipo === 'inversion'
-      ? `<dt>Origen</dt><dd>Retorno de la inversión «${esc(store.getMov(m.origen.gastoId)?.nombre || 'eliminada')}»</dd>`
-      : '';
+    : '';
   return `
     <div class="detail-body">
       <div class="desc">${m.descripcion ? esc(m.descripcion).replace(/\n/g, '<br>') : '<span class="muted">Sin descripción.</span>'}</div>
@@ -255,13 +256,14 @@ function detalle(m) {
             ? `gasto en <b class="pos">$0</b>, con <b class="pos">${clp(m.reembolso - m.monto)}</b> de ingreso extra`
             : `gasto neto <b class="${m.reembolso === m.monto ? '' : 'neg'}">${clp(gastoEfectivo(m))}</b>`
         }</dd>` : ''}
-        ${est ? `<dt>Invertido</dt><dd>${clp(m.monto)}</dd>
-          <dt>Retorno</dt><dd>${est.retorno != null ? `${clp(est.retorno)} <span class="${est.diferencia > 0 ? 'pos' : 'neg'}">${clpSigned(est.diferencia)} (${pct(est.rentabilidad)})</span>` : 'Pendiente'}</dd>` : ''}
+        ${inv ? `<dt>Inversión</dt><dd>${ENTRADA_LABEL[entradaDe(m)]} de ${inversionPill(inv.id)} <span class="muted">(${inv.tipo})</span></dd>` : ''}
       </dl>
     </div>`;
 }
 
 async function onTableClick(e, root) {
+  const ip = e.target.closest('[data-inv]');
+  if (ip) { go('inversion', { id: ip.dataset.inv }); return; }
   const dp = e.target.closest('[data-deuda]');
   if (dp) {
     const d = state.deudas.find((x) => x.id === dp.dataset.deuda);
@@ -287,13 +289,15 @@ async function onTableClick(e, root) {
   if (!m) return;
   const act = e.target.closest('[data-act]')?.dataset.act;
 
-  if (act === 'edit' || act === 'estado') { openMovimientoForm(m); return; }
+  if (act === 'edit') { openMovimientoForm(m); return; }
   if (act === 'reembolso') { openReembolsoForm(m); return; }
   if (act === 'del') {
-    const auto = store.autoRetorno(m);
+    const { error } = store.revisarCambioMov(m, null);
+    if (error) { toast(error, 'warn'); return; }
+    const inv = m.inversionId ? store.getInversion(m.inversionId) : null;
     const ok = await confirmDialog({
       title: 'Eliminar movimiento',
-      message: `Se eliminará <b>${esc(m.nombre)}</b> (${clp(m.monto)}).${auto ? '<br>También se eliminará su ingreso de retorno automático.' : ''}`,
+      message: `Se eliminará <b>${esc(m.nombre)}</b> (${clp(m.monto)}).${inv ? `<br>También dejará de contar en la inversión «${esc(inv.nombre)}».` : ''}`,
       confirmIcon: 'trash',
       danger: true,
     });

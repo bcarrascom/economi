@@ -10,7 +10,7 @@ const fs = require('fs');
 const fsp = fs.promises;
 
 // Archivos de datos permitidos dentro de la carpeta elegida.
-const ALLOWED = new Set(['movimientos.json', 'compras.json', 'tags.json', 'deudas.json', 'sueldos.json', 'ajustes.json']);
+const ALLOWED = new Set(['movimientos.json', 'compras.json', 'tags.json', 'deudas.json', 'sueldos.json', 'inversiones.json', 'ajustes.json']);
 const BACKUP_DIR = 'respaldos';
 const BACKUPS_TO_KEEP = 14;
 

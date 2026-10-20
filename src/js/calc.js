@@ -1,6 +1,6 @@
 // Lógica financiera pura (sin DOM). Todas las definiciones del glosario viven aquí.
 //
-//  Neto                 = saldo inicial + Σ ingresos − Σ gastos   (inversiones cuentan como gasto)
+//  Neto                 = saldo inicial + Σ ingresos − Σ gastos   (aportes a inversiones externas cuentan como gasto)
 //  Presupuesto ahorro   = ahorro inicial + Σ aportes de ingresos + Σ ajustes manuales − Σ gastos pagados desde ahorro
 //  Bolsillo             = Neto − Presupuesto de ahorro
 //  Objetivo             = Σ costo de ítems de la lista de compras marcados como ahorro
@@ -159,20 +159,103 @@ export function serieTemporal(state) {
   return out;
 }
 
-/** Estado de una inversión: pendiente | ganancia | perdida */
-export function estadoInversion(g, movs) {
-  if (!esGasto(g) || !g.esInversion) return null;
-  const id = g.inversion?.ingresoId;
-  const ing = id ? movs.find((m) => m.id === id) : null;
-  if (!ing) return { estado: 'pendiente', retorno: null, diferencia: null, rentabilidad: null };
-  const diferencia = ing.monto - g.monto;
+// ---------- Inversiones ----------
+//
+// Entradas de una inversión: aporte | retiro | ganancia | perdida.
+//   Externa: aporte = gasto en tu cuenta, retiro = ingreso en tu cuenta; ganancias/pérdidas
+//            solo cambian el valor de la inversión (no tocan tu cuenta hasta que retiras).
+//   Interna: no hay plata "dentro" de la inversión: cada gasto es una pérdida y cada ingreso
+//            una ganancia, ambos directo en tu cuenta (ej. publicidad pagada → venta).
+// Las entradas que tocan tu cuenta SON movimientos (movimiento.inversionId); las que no,
+// viven en inversion.variaciones. Así no hay datos duplicados que sincronizar.
+//
+//  Saldo  (externa) = aportes + ganancias − pérdidas − retiros   (lo que realmente hay dentro)
+//  Monto  (externa) = aportes + ganancias − pérdidas             (lo que vale en teoría; retirar no lo cambia)
+//  Resultado        = ganancias − pérdidas                       (lo que ganaste o perdiste)
+
+export const ENTRADA_LABEL = { aporte: 'Aporte', retiro: 'Retiro', ganancia: 'Ganancia', perdida: 'Pérdida' };
+const SIGNO_SALDO = { aporte: 1, ganancia: 1, retiro: -1, perdida: -1 };
+
+/** Tipo de entrada que representa un movimiento vinculado a una inversión. */
+export function tipoEntrada(invTipo, movTipo) {
+  if (invTipo === 'externa') return movTipo === 'gasto' ? 'aporte' : 'retiro';
+  return movTipo === 'gasto' ? 'perdida' : 'ganancia';
+}
+
+/** ¿Esta entrada mueve plata de tu cuenta (y por lo tanto es un movimiento)? */
+export const afectaCuenta = (invTipo, tipo) => invTipo === 'interna' || tipo === 'aporte' || tipo === 'retiro';
+
+/** Tipo de movimiento (ingreso/gasto) con el que se registra una entrada que afecta tu cuenta. */
+export const movTipoDe = (tipo) => (tipo === 'aporte' || tipo === 'perdida' ? 'gasto' : 'ingreso');
+
+/** Orden cronológico; en un mismo día primero lo que suma al saldo (un retiro no "adelanta" a su aporte). */
+const ordenEntradas = (a, b) => a.fecha.localeCompare(b.fecha)
+  || SIGNO_SALDO[b.tipo] - SIGNO_SALDO[a.tipo]
+  || (a.creado || '').localeCompare(b.creado || '');
+
+/** Todas las entradas de una inversión (movimientos vinculados + variaciones), en orden cronológico. */
+export function entradasInversion(inv, movs) {
+  const desdeMovs = movs.filter((m) => m.inversionId === inv.id).map((m) => ({
+    id: m.id, tipo: tipoEntrada(inv.tipo, m.tipo), fecha: m.fecha, monto: m.monto,
+    nombre: m.nombre, descripcion: m.descripcion, movId: m.id, creado: m.creado,
+  }));
+  const variaciones = (inv.variaciones || []).map((v) => ({ ...v, movId: null }));
+  return [...desdeMovs, ...variaciones].sort(ordenEntradas);
+}
+
+/** Saldo mínimo que alcanza la inversión en su línea de tiempo (negativo = entradas imposibles). */
+export function saldoMinimo(entradas) {
+  let saldo = 0;
+  let min = 0;
+  for (const e of [...entradas].sort(ordenEntradas)) {
+    saldo += SIGNO_SALDO[e.tipo] * e.monto;
+    min = Math.min(min, saldo);
+  }
+  return min;
+}
+
+/** Números de una inversión. `estado`: activa | ganancia | perdida | neutra (las tres últimas = completada). */
+export function resumenInversion(inv, movs) {
+  const entradas = entradasInversion(inv, movs);
+  const tot = (t) => sum(entradas.filter((e) => e.tipo === t), (e) => e.monto);
+  const aportado = tot('aporte');
+  const retirado = tot('retiro');
+  const ganancias = tot('ganancia');
+  const perdidas = tot('perdida');
+  const resultado = ganancias - perdidas;
+  // Base para la rentabilidad: en una externa lo aportado; en una interna lo gastado.
+  const base = inv.tipo === 'externa' ? aportado : perdidas;
+  const estado = inv.estado === 'activa' ? 'activa' : resultado > 0 ? 'ganancia' : resultado < 0 ? 'perdida' : 'neutra';
   return {
-    estado: diferencia > 0 ? 'ganancia' : 'perdida',
-    retorno: ing.monto,
-    diferencia,
-    rentabilidad: g.monto > 0 ? (diferencia / g.monto) * 100 : null,
-    ingreso: ing,
+    entradas,
+    aportado,
+    retirado,
+    ganancias,
+    perdidas,
+    saldo: aportado + ganancias - perdidas - retirado,
+    monto: aportado + ganancias - perdidas,
+    resultado,
+    rentabilidad: base > 0 ? (resultado / base) * 100 : null,
+    estado,
   };
+}
+
+/** Serie acumulada por fecha: saldo, monto y resultado después de cada día con entradas. */
+export function serieInversion(entradas) {
+  let saldo = 0;
+  let monto = 0;
+  let resultado = 0;
+  const out = [];
+  for (const e of entradas) {
+    saldo += SIGNO_SALDO[e.tipo] * e.monto;
+    if (e.tipo !== 'retiro') monto += SIGNO_SALDO[e.tipo] * e.monto;
+    if (e.tipo === 'ganancia') resultado += e.monto;
+    if (e.tipo === 'perdida') resultado -= e.monto;
+    const last = out[out.length - 1];
+    if (last && last.fecha === e.fecha) Object.assign(last, { saldo, monto, resultado });
+    else out.push({ fecha: e.fecha, saldo, monto, resultado });
+  }
+  return out;
 }
 
 /** Totales por tag. Un movimiento con varios tags suma en cada uno. Los gastos usan su monto ya neto de reembolsos. */

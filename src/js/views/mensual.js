@@ -1,4 +1,5 @@
 // Progresión: evolución de ingresos, gastos y coeficiente en el tiempo, más el detalle mes a mes.
+// El módulo también incluye Inversiones (views/inversiones.js), como segunda pestaña del encabezado.
 
 import { state } from '../store.js';
 import {
@@ -13,6 +14,7 @@ import {
   tagPill, segmented, bindSegmented, aplicarCensura,
 } from '../ui.js';
 import { chart, moneyScale, catScale, moneyTooltip, COLORS } from '../charts.js';
+import { go, SECCIONES_PROGRESION } from '../app.js';
 
 let anio = currentYear();
 const abiertos = new Set();
@@ -60,6 +62,7 @@ export function render(root, { first }) {
   root.innerHTML = `
     <header class="page-head">
       <div><h1>Progresión</h1><p class="subtitle">Visualiza tus finanzas en el tiempo y compara meses</p></div>
+      ${segmented('seccion', SECCIONES_PROGRESION, 'progresion')}
       <div class="spacer"></div>
       <div class="year-nav">
         <button class="ibtn ghost sm" data-y="-1" ${anio <= minY ? 'disabled' : ''} data-tip="Año anterior">${icon('chevronLeft')}</button>
@@ -113,6 +116,7 @@ export function render(root, { first }) {
     </div>`;
 
   aplicarCensura(root);
+  bindSegmented(root, 'seccion', (v) => go(v));
   root.querySelectorAll('[data-y]').forEach((b) => {
     b.onclick = () => { anio += Number(b.dataset.y); render(root, { first: true }); };
   });
