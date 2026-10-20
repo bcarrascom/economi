@@ -1,4 +1,4 @@
-// Formulario para crear o editar un sueldo/remuneración recurrente.
+// Formulario para crear o editar un sueldo (ingreso recurrente) o una subscripción (cobro recurrente).
 
 import * as store from '../store.js';
 import {
@@ -8,12 +8,19 @@ import { uid, today, esc } from '../format.js';
 
 const UNIDADES = [['dia', 'Días'], ['semana', 'Semanas'], ['mes', 'Meses'], ['anio', 'Años']];
 
+const TXT = {
+  sueldo: { uno: 'sueldo', o: 'o', placeholder: 'Sueldo, Remuneración diaria…', mov: 'ingreso', variable: 'una remuneración diaria' },
+  subscripcion: { uno: 'subscripción', o: 'a', placeholder: 'Netflix, Arriendo, Gimnasio…', mov: 'gasto', variable: 'una cuenta de luz' },
+};
+
 /**
- * @param {object|null} existing  sueldo a editar
+ * @param {object|null} existing  sueldo/subscripción a editar
+ * @param {object} preset         { clase } para nuevos
  */
-export function openSueldoForm(existing = null) {
+export function openSueldoForm(existing = null, preset = {}) {
   const s = existing ? { ...existing } : {
     id: uid(),
+    clase: preset.clase === 'subscripcion' ? 'subscripcion' : 'sueldo',
     nombre: '',
     monto: null,
     frecuenciaCantidad: 1,
@@ -25,6 +32,7 @@ export function openSueldoForm(existing = null) {
     activo: true,
     creado: new Date().toISOString(),
   };
+  let clase = s.clase;
   let conMonto = s.monto != null;
   let unidad = s.frecuenciaUnidad;
   let modo = s.modo;
@@ -34,12 +42,16 @@ export function openSueldoForm(existing = null) {
   const q = (n) => el.querySelector(`[name="${n}"]`);
 
   const body = `
-    <div class="field"><label>Nombre</label><input class="input" name="nombre" maxlength="80" value="${esc(s.nombre)}" placeholder="Sueldo, Remuneración diaria…" autofocus></div>
+    <div class="form-row center">${segmented('clase', [['sueldo', 'Sueldo'], ['subscripcion', 'Subscripción']], clase)}</div>
+    <div class="hint" data-el="claseHint"></div>
+    <div class="field"><label>Nombre</label><input class="input" name="nombre" maxlength="80" value="${esc(s.nombre)}" placeholder="${TXT[clase].placeholder}" autofocus></div>
+
+    <div class="row-line"><span>Activ${TXT[clase].o}</span>${sw('activo', s.activo !== false)}</div>
 
     <div class="row-line"><span>Monto fijo</span>${sw('conMonto', conMonto)}</div>
     <div class="collapse ${conMonto ? 'open' : ''}" data-sec="monto"><div><div class="pad-top">
       <div class="money"><span>$</span><input class="input" name="monto" inputmode="numeric" placeholder="0" value="${s.monto || ''}"></div>
-      <div class="hint">Si lo dejas sin monto fijo, te lo pedirá cada vez (útil si varía, como una remuneración diaria).</div>
+      <div class="hint" data-el="montoHint"></div>
     </div></div></div>
 
     <div class="field"><label>Frecuencia</label>
@@ -60,7 +72,7 @@ export function openSueldoForm(existing = null) {
     <div class="field"><label>Tags</label><div data-el="tags"></div></div>`;
 
   openModal({
-    title: existing ? 'Editar sueldo' : 'Nuevo sueldo',
+    title: existing ? `Editar ${TXT[clase].uno}` : 'Nuevo sueldo o subscripción',
     width: 480,
     body,
     onMount: (root) => {
@@ -78,6 +90,17 @@ export function openSueldoForm(existing = null) {
 
       const segModo = bindSegmented(el, 'modo', (v) => { modo = v; updateModoHint(); });
       bindSegmented(el, 'unidad', (v) => { unidad = v; });
+      bindSegmented(el, 'clase', (v) => { clase = v; updateClase(); });
+
+      // Textos que cambian según sea sueldo (ingreso) o subscripción (gasto).
+      function updateClase() {
+        const t = TXT[clase];
+        el.querySelector('[data-el="claseHint"]').textContent = `Cada vez que toque, registra un ${t.mov}.`;
+        el.querySelector('[data-el="montoHint"]').textContent = `Si lo dejas sin monto fijo, te lo pedirá cada vez (útil si varía, como ${t.variable}).`;
+        q('nombre').placeholder = t.placeholder;
+        q('activo').closest('.row-line').querySelector('span').textContent = `Activ${t.o}`;
+      }
+      updateClase();
 
       q('conMonto').onchange = (e) => {
         conMonto = e.target.checked;
@@ -98,6 +121,8 @@ export function openSueldoForm(existing = null) {
       {
         icon: 'check', tip: 'Guardar (Enter)', kind: 'primary', primary: true,
         onClick: (close) => {
+          s.clase = clase;
+          s.activo = q('activo').checked;
           s.nombre = q('nombre').value.trim();
           s.frecuenciaCantidad = Number(q('cantidad').value) || 1;
           s.frecuenciaUnidad = unidad;
@@ -116,7 +141,8 @@ export function openSueldoForm(existing = null) {
           }
 
           store.saveSueldo(s);
-          toast(existing ? 'Sueldo actualizado' : 'Sueldo creado');
+          const t = TXT[clase];
+          toast(`${t.uno[0].toUpperCase()}${t.uno.slice(1)} ${existing ? 'actualizad' : 'cread'}${t.o}`);
           close();
         },
       },

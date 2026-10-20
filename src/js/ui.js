@@ -228,6 +228,17 @@ export function inversionPill(invId) {
   return `<span class="pill inv" style="--c:${c}" data-inv="${inv.id}" data-tip="Ver inversión">${icon('invest', 'pill-ico')}${esc(inv.nombre)}</span>`;
 }
 
+/**
+ * Pill del sueldo/subscripción que generó un movimiento (va antes de sus tags). Click → Sueldos y
+ * subscripciones. Vacío si el movimiento no viene de uno (o si se eliminó).
+ */
+export function sueldoPill(m) {
+  const s = store.sueldoDeMov(m);
+  if (!s) return '';
+  const c = s.clase === 'sueldo' ? 'var(--green)' : 'var(--red)';
+  return `<span class="pill inv${s.activo ? '' : ' apagado'}" style="--c:${c}" data-sueldo="${s.id}" data-tip="${s.clase === 'sueldo' ? 'Sueldo' : 'Subscripción'}${s.activo ? '' : s.clase === 'sueldo' ? ' (apagado)' : ' (apagada)'} · ver en Sueldos y subscripciones">${icon('refresh', 'pill-ico')}${esc(s.nombre)}</span>`;
+}
+
 export const yesNo = (v) => (v == null
   ? '<span class="muted">—</span>'
   : `<span class="yn ${v ? 'yes' : 'no'}" data-tip="${v ? 'Alcanza' : 'No alcanza'}">${icon(v ? 'check' : 'close')}</span>`);

@@ -38,6 +38,7 @@ La primera vez te pedirá la carpeta de datos. Cada equipo recuerda su propia ru
 app-finanzas/
 ├── movimientos.json   ingresos y gastos (los de una inversión llevan inversionId)
 ├── inversiones.json   inversiones + sus ganancias/pérdidas que no tocan tu cuenta
+├── sueldos.json       sueldos (ingresos recurrentes) y subscripciones (cobros recurrentes)
 ├── compras.json       lista de compras
 ├── tags.json          tags (nombre + color)
 ├── ajustes.json       saldos iniciales, aporte por defecto, ajustes de ahorro
