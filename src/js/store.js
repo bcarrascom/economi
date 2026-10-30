@@ -104,6 +104,8 @@ export function normCompra(c = {}) {
     costo: Math.max(0, int(c.costo)),
     tags: Array.isArray(c.tags) ? [...new Set(c.tags)] : [],
     esAhorro: !!c.esAhorro,
+    // Prioridad dentro del ahorro (menor = antes). null en ítems antiguos: van al final, por costo.
+    orden: Number.isFinite(c.orden) ? c.orden : null,
     creado: c.creado || new Date().toISOString(),
   };
 }
@@ -792,6 +794,11 @@ export function usoTag(id) {
 
 // ---------- Lista de compras ----------
 export function saveCompra(c) {
+  const antes = state.compras.find((x) => x.id === c.id);
+  // Lo nuevo en el ahorro entra al final de la prioridad.
+  if (c.esAhorro && !antes?.esAhorro) {
+    c = { ...c, orden: Math.max(-1, ...state.compras.map((x) => x.orden ?? -1)) + 1 };
+  }
   const n = normCompra(c);
   upsert(state.compras, n);
   persist('compras');
@@ -801,6 +808,16 @@ export function saveCompra(c) {
 
 export function deleteCompra(id) {
   state.compras = state.compras.filter((c) => c.id !== id);
+  persist('compras');
+  emit();
+}
+
+/** Fija el orden de prioridad del ahorro según la lista de ids (el primero es el más prioritario). */
+export function reordenarCompras(ids) {
+  ids.forEach((id, i) => {
+    const c = state.compras.find((x) => x.id === id);
+    if (c) c.orden = i;
+  });
   persist('compras');
   emit();
 }

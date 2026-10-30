@@ -357,6 +357,27 @@ export function frecuenciaTexto(s) {
 }
 
 /** Métricas de un ítem de la lista de compras. */
+/** Ítems de ahorro en orden de prioridad (los antiguos sin orden van al final, por costo). */
+export const ordenAhorro = (compras) => compras
+  .filter((c) => c.esAhorro)
+  .sort((a, b) => (a.orden ?? Infinity) - (b.orden ?? Infinity) || a.costo - b.costo);
+
+/**
+ * Prioridad del ahorro: para pagar un ítem hay que pagar antes todos los anteriores,
+ * así que cada uno se evalúa con el acumulado hasta él. Devuelve Map id → { pos, acumulado, alcanza }
+ * con alcanza = 'ahorro' | 'neto' | 'no'.
+ */
+export function prioridadAhorro(compras, r) {
+  const out = new Map();
+  let acumulado = 0;
+  ordenAhorro(compras).forEach((c, i) => {
+    acumulado += c.costo;
+    const alcanza = acumulado <= r.ahorro ? 'ahorro' : acumulado <= r.neto ? 'neto' : 'no';
+    out.set(c.id, { pos: i + 1, acumulado, alcanza });
+  });
+  return out;
+}
+
 export function metricasCompra(item, r) {
   return {
     pctObjetivo: item.esAhorro && r.objetivo > 0 ? (item.costo / r.objetivo) * 100 : null,

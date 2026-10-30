@@ -47,6 +47,7 @@ export const ICONS = {
   lockOpen: '<rect x="5" y="11" width="14" height="9" rx="2.2"/><path d="M8 11V7a4 4 0 0 1 7.5-2.4"/><circle cx="12" cy="15.3" r="1.3" fill="currentColor"/>',
   heart: '<path d="M12 20s-7.2-4.4-9.5-8.6C.9 8 2.4 4.3 6 3.8a5 5 0 0 1 6 2.1 5 5 0 0 1 6-2.1c3.6.5 5.1 4.2 3.5 7.6C19.2 15.6 12 20 12 20z"/>',
   refund: '<path d="M9 7L4 12l5 5"/><path d="M4 12h10.5a5.5 5.5 0 1 1 0 11H12"/>',
+  grip: '<circle cx="9" cy="6.5" r="1" fill="currentColor"/><circle cx="15" cy="6.5" r="1" fill="currentColor"/><circle cx="9" cy="12" r="1" fill="currentColor"/><circle cx="15" cy="12" r="1" fill="currentColor"/><circle cx="9" cy="17.5" r="1" fill="currentColor"/><circle cx="15" cy="17.5" r="1" fill="currentColor"/>',
 };
 
 export function icon(name, cls = '') {

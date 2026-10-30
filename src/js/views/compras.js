@@ -2,7 +2,7 @@
 
 import * as store from '../store.js';
 import { state } from '../store.js';
-import { resumen, metricasCompra, filtrarPorTags } from '../calc.js';
+import { resumen, metricasCompra, filtrarPorTags, ordenAhorro, prioridadAhorro } from '../calc.js';
 import { clp, esc, fechaHora, shortId, pct, scaleColor, clamp } from '../format.js';
 import { icon } from '../icons.js';
 import {
@@ -45,7 +45,9 @@ export function render(root, { first }) {
   requestAnimationFrame(() => root.querySelector('.progress-card .bar i')?.classList.add('in'));
   root.querySelector('[data-act="nuevo"]').onclick = () => openCompraForm();
   tagFilter(root.querySelector('[data-el="filter"]'), filtro, (v) => { filtro = v; table(root, r, true); });
-  root.querySelector('[data-el="table"]').addEventListener('click', (e) => onClick(e));
+  const tabla = root.querySelector('[data-el="table"]');
+  tabla.addEventListener('click', (e) => onClick(e));
+  bindArrastre(tabla);
   table(root, r, first);
 }
 
@@ -57,9 +59,11 @@ function table(root, r, anim) {
     return;
   }
   const ids = state.ajustes.mostrarIds;
-  const ahorro = items.filter((c) => c.esAhorro).sort((a, b) => a.costo - b.costo);
+  const ahorro = ordenAhorro(items);
   const otros = items.filter((c) => !c.esAhorro).sort((a, b) => a.costo - b.costo);
-  const n = 9 + (ids ? 1 : 0);
+  // La prioridad se calcula sobre todo el ahorro: lo filtrado igual hay que pagarlo antes.
+  const prio = prioridadAhorro(state.compras, r);
+  const n = 10 + (ids ? 1 : 0);
   let i = 0;
 
   const seccion = (titulo, ic, lista, total, extra) => `
@@ -67,12 +71,13 @@ function table(root, r, anim) {
       ${icon(ic)}<b>${titulo}</b><span class="muted">${lista.length} ${lista.length === 1 ? 'ítem' : 'ítems'}</span>
       <span class="spacer"></span>${extra}<b>${clp(total)}</b>
     </div></td></tr>
-    ${lista.length ? lista.map((c) => fila(c, r, i++, anim, ids, n)).join('') : `<tr class="section-empty"><td colspan="${n}"><span class="muted">Nada en esta sección${filtro.length ? ' con estos filtros' : ''}.</span></td></tr>`}`;
+    ${lista.length ? lista.map((c) => fila(c, r, prio.get(c.id), i++, anim, ids, n)).join('') : `<tr class="section-empty"><td colspan="${n}"><span class="muted">Nada en esta sección${filtro.length ? ' con estos filtros' : ''}.</span></td></tr>`}`;
 
   el.innerHTML = `
     <div class="table-wrap">
       <table class="t t-head-static">
         <thead><tr>
+          <th class="w-grip"></th>
           <th class="w-exp"></th>
           ${ids ? '<th>ID</th>' : ''}
           <th class="grow">Producto o servicio</th>
@@ -81,7 +86,7 @@ function table(root, r, anim) {
           <th>% del objetivo</th>
           <th>% del total</th>
           <th class="c">Alcanza el ahorro</th>
-          <th class="c">Alcanza el neto</th>
+          <th class="c" data-tip="Arrastra las filas del ahorro para ordenarlas. Cada ítem se evalúa con su costo más el de todos los anteriores">Prioridad</th>
           <th class="w-act"></th>
         </tr></thead>
         <tbody>
@@ -92,10 +97,23 @@ function table(root, r, anim) {
     </div>`;
 }
 
-function fila(c, r, i, anim, ids, n) {
+const ALCANZA = {
+  ahorro: { cls: 'yes', ic: 'check', tip: 'Alcanza el presupuesto de ahorro' },
+  neto: { cls: 'warn', ic: 'check', tip: 'No alcanza el ahorro, pero sí el neto' },
+  no: { cls: 'no', ic: 'close', tip: 'No alcanza' },
+};
+
+function prioCell(p) {
+  if (!p) return '<span class="muted">—</span>';
+  const a = ALCANZA[p.alcanza];
+  return `<span class="prio"><span class="mono dim">#${p.pos}</span><span class="yn ${a.cls}" data-tip="${a.tip} · Acumulado ${clp(p.acumulado)}">${icon(a.ic)}</span></span>`;
+}
+
+function fila(c, r, p, i, anim, ids, n) {
   const mt = metricasCompra(c, r);
   return `
-    <tr class="row ${anim ? 'anim' : ''} ${abiertos.has(c.id) ? 'is-open' : ''}" data-id="${c.id}" style="--i:${Math.min(i, 24)}">
+    <tr class="row ${c.esAhorro ? 'ahorro' : ''} ${anim ? 'anim' : ''} ${abiertos.has(c.id) ? 'is-open' : ''}" data-id="${c.id}" style="--i:${Math.min(i, 24)}">
+      <td class="w-grip">${c.esAhorro ? `<span class="grip" data-tip="Arrastra para cambiar la prioridad">${icon('grip')}</span>` : ''}</td>
       <td class="w-exp">${icon('chevronRight', 'chev')}</td>
       ${ids ? `<td><span class="mono dim">${shortId(c.id)}</span></td>` : ''}
       <td class="grow"><span class="name"><span class="name-text">${esc(c.nombre)}</span>${c.descripcion ? '<span class="has-desc" data-tip="Tiene descripción"></span>' : ''}</span></td>
@@ -104,7 +122,7 @@ function fila(c, r, i, anim, ids, n) {
       <td>${pctCell(mt.pctObjetivo)}</td>
       <td>${pctCell(mt.pctTotal)}</td>
       <td class="c">${yesNo(mt.comprableAhorro)}</td>
-      <td class="c">${yesNo(mt.comprableNeto)}</td>
+      <td class="c">${prioCell(p)}</td>
       <td class="w-act"><div class="acts">
         <button class="ibtn ghost xs" data-act="edit" data-tip="Editar">${icon('edit')}</button>
         <button class="ibtn ghost xs danger" data-act="del" data-tip="Quitar de la lista">${icon('trash')}</button>
@@ -122,7 +140,7 @@ function fila(c, r, i, anim, ids, n) {
 
 async function onClick(e) {
   const tr = e.target.closest('tr.row');
-  if (!tr) return;
+  if (!tr || e.target.closest('.grip')) return;
   const c = state.compras.find((x) => x.id === tr.dataset.id);
   if (!c) return;
   const act = e.target.closest('[data-act]')?.dataset.act;
@@ -139,6 +157,58 @@ async function onClick(e) {
   if (open) abiertos.add(c.id); else abiertos.delete(c.id);
   tr.classList.toggle('is-open', open);
   tr.nextElementSibling?.classList.toggle('open', open);
+}
+
+/**
+ * Arrastrar filas del ahorro (solo desde el asa) para cambiar la prioridad.
+ * Con filtro activo, los ítems visibles se reordenan entre las posiciones que ya ocupan.
+ */
+function bindArrastre(el) {
+  let arrastrada = null;
+  const limpiar = () => el.querySelectorAll('.drop-before, .drop-after').forEach((x) => x.classList.remove('drop-before', 'drop-after'));
+  const destino = (e) => {
+    const tr = e.target.closest('tr.row.ahorro');
+    if (!tr || tr === arrastrada) return null;
+    const rect = tr.getBoundingClientRect();
+    return { tr, despues: e.clientY > rect.top + rect.height / 2 };
+  };
+
+  el.addEventListener('pointerdown', (e) => {
+    const tr = e.target.closest('.grip')?.closest('tr.row');
+    if (tr) tr.draggable = true;
+  });
+  el.addEventListener('pointerup', () => el.querySelectorAll('tr[draggable]').forEach((x) => x.removeAttribute('draggable')));
+  el.addEventListener('dragstart', (e) => {
+    arrastrada = e.target.closest?.('tr.row.ahorro');
+    if (!arrastrada) return;
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', arrastrada.dataset.id);
+    arrastrada.classList.add('dragging');
+  });
+  el.addEventListener('dragover', (e) => {
+    if (!arrastrada) return;
+    const d = destino(e);
+    if (!d) return;
+    e.preventDefault();
+    limpiar();
+    d.tr.classList.add(d.despues ? 'drop-after' : 'drop-before');
+  });
+  el.addEventListener('drop', (e) => {
+    const d = arrastrada && destino(e);
+    if (!d) return;
+    e.preventDefault();
+    const visibles = [...el.querySelectorAll('tr.row.ahorro')].map((x) => x.dataset.id).filter((id) => id !== arrastrada.dataset.id);
+    visibles.splice(visibles.indexOf(d.tr.dataset.id) + (d.despues ? 1 : 0), 0, arrastrada.dataset.id);
+    const enVista = new Set(visibles);
+    const nuevos = visibles.values();
+    store.reordenarCompras(ordenAhorro(state.compras).map((c) => (enVista.has(c.id) ? nuevos.next().value : c.id)));
+  });
+  el.addEventListener('dragend', () => {
+    limpiar();
+    arrastrada?.classList.remove('dragging');
+    arrastrada?.removeAttribute('draggable');
+    arrastrada = null;
+  });
 }
 
 /** Pide confirmar (y ajustar si hace falta) el precio final antes de registrar la compra como gasto. */

@@ -19,6 +19,7 @@
   --green: #62d6a0;
   --red: #ff7a7a;
   --orange: #ffb35c;
+  --yellow: #f2d45c;
 
   --r-sm: 8px;
   --r: 12px;
@@ -281,6 +282,8 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 16px; }
 .yn .ico { width: 12px; height: 12px; stroke-width: 2.2; }
 .yn.yes { color: var(--green); background: rgba(98,214,160,.12); }
 .yn.no { color: var(--red); background: rgba(255,122,122,.12); }
+.yn.warn { color: var(--yellow); background: rgba(242,212,92,.12); }
+.prio { display: inline-flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
 
 .pct-cell { display: inline-flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; color: var(--text-2); }
 .pct-track { width: 46px; height: 3px; border-radius: 99px; background: rgba(255,255,255,.07); overflow: hidden; }
@@ -319,6 +322,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 16px; }
 .t th.sortable:hover { color: var(--text-2); }
 .sort-ind .ico { width: 11px; height: 11px; vertical-align: -2px; margin-left: 3px; color: var(--accent); }
 .w-exp { width: 28px; padding-right: 0 !important; }
+.w-grip { width: 22px; padding: 0 0 0 6px !important; }
 .w-act { width: 1%; }
 
 /* Notificación de sueldo/remuneración pendiente (arriba de Movimientos). */
@@ -351,6 +355,14 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 16px; }
 .amount { font-weight: 550; }
 .amount-stack { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 1px; line-height: 1.25; }
 .amount-calc { font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+
+.grip { display: inline-grid; place-items: center; width: 16px; height: 20px; color: var(--text-3); cursor: grab; opacity: .5; transition: opacity .2s, color .2s; }
+.grip .ico { width: 13px; height: 13px; }
+.t tr.row:hover .grip { opacity: 1; }
+.grip:hover { color: var(--text); }
+.t tr.row.dragging td { opacity: .4; }
+.t tr.row.drop-before td { box-shadow: inset 0 2px 0 var(--accent); }
+.t tr.row.drop-after td { box-shadow: inset 0 -2px 0 var(--accent); }
 
 .t tr.row.anim { animation: rowIn .45s var(--ease) both; animation-delay: calc(var(--i, 0) * 16ms); }
 @keyframes rowIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
