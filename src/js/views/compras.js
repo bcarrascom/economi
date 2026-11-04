@@ -109,6 +109,16 @@ function prioCell(p) {
   return `<span class="prio"><span class="mono dim">#${p.pos}</span><span class="yn ${a.cls}" data-tip="${a.tip} · Acumulado ${clp(p.acumulado)}">${icon(a.ic)}</span></span>`;
 }
 
+/** Si alcanza, tick verde; si no, anillo que se completa (y pasa de rojo a verde) según cuánto del costo cubre el ahorro. */
+function ahorroCell(c, mt, r) {
+  if (mt.comprableAhorro !== false) return yesNo(mt.comprableAhorro);
+  const p = clamp(Math.floor((Math.max(r.ahorro, 0) / c.costo) * 100), 0, 99);
+  const col = scaleColor(p / 50 - 1);
+  return `<span class="ring" style="--c:${col}" data-tip="El ahorro cubre el ${p}% · Faltan ${clp(c.costo - r.ahorro)}">
+    <svg viewBox="0 0 36 36" aria-hidden="true"><circle class="ring-track" cx="18" cy="18" r="16"/>${p > 0 ? `<circle class="ring-fill" cx="18" cy="18" r="16" pathLength="100" stroke-dasharray="${p} 100"/>` : ''}</svg>
+    <b>${p}%</b></span>`;
+}
+
 function fila(c, r, p, i, anim, ids, n) {
   const mt = metricasCompra(c, r);
   return `
@@ -121,7 +131,7 @@ function fila(c, r, p, i, anim, ids, n) {
       <td class="num">${clp(c.costo)}</td>
       <td>${pctCell(mt.pctObjetivo)}</td>
       <td>${pctCell(mt.pctTotal)}</td>
-      <td class="c">${yesNo(mt.comprableAhorro)}</td>
+      <td class="c">${ahorroCell(c, mt, r)}</td>
       <td class="c">${prioCell(p)}</td>
       <td class="w-act"><div class="acts">
         <button class="ibtn ghost xs" data-act="edit" data-tip="Editar">${icon('edit')}</button>
